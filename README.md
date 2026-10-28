@@ -76,11 +76,25 @@
 
 ---
 
-### Planned Stretch Features
+### Declared Stretch Features (Planned Upfront)
 
-1. **Third Signal (Repetition & N-Gram Entropy)**: Incorporated into scoring to measure lexical loops and robotic phrase recycling, with documented weights.
-2. **`GET /content/<id>` Endpoint**: Inspects audit history and returns the live lifecycle state (`decided`, `under_review`, `verified_human`) of any submission.
-3. **Verified-Human Credential Path**: A lightweight verification flow allowing creators to register a verified badge, which automatically factors into scoring and display.
+All three stretch features are declared here before implementation:
+
+1. **A Third Signal (Repetition & Lexical Entropy) + Weighting Note**:
+   - **What is added**: A third signal in `stylometry.py` (`repetition_signal`) measuring token n-gram repetition, repetitive phrase patterns, and Shannon lexical entropy.
+   - **Weighting Note (How the three are weighted)**:
+     - Model signal (`detector.py`): **0.45** (45%)
+     - Style signal (`stylometry.py`): **0.35** (35%)
+     - Repetition signal (`stylometry.py`): **0.20** (20%)
+     - **Weighting Rationale**: Model perplexity is the strongest indicator of semantic predictability, but cannot be given dominant majority weight because of its bias against simple human writing (ESL writers). Stylometry receives 35% to check sentence length variance and punctuation cadence. The repetition signal receives 20% to penalize robotic multi-phrase loops and redundant transitions common in LLM generation. When signals split, the weighted blend avoids knee-jerk false accusations and routes borderline cases to "unsure".
+
+2. **`GET /content/<id>` Endpoint**:
+   - **What is added**: An endpoint in `app.py` allowing clients and authors to query the current status of any submitted `content_id`.
+   - **Behavior**: Retrieves all audit entries for the ID from `audit.entries_for(content_id)`. Computes the active lifecycle state (`decided`, `under_review`, or `verified_human`), original decision details (`guess`, `confidence`, `label`, signal scores), and full chronological event audit trail.
+
+3. **A Verified-Human Path**:
+   - **What is added**: A writer earns a trusted creator credential through an attestation/verification endpoint (`POST /verify-creator`). 
+   - **How it shows on their work**: When a verified creator submits content via `POST /submit` or when their item is queried via `GET /content/<id>`, the system flags `verified_creator: true`, attaches an official badge in the label/response (`"Verified Human Author"`), and adjusts the classification confidence to reflect validated authorship provenance.
 
 ---
 
@@ -203,8 +217,13 @@ Legitimate technical, legal, scientific, or instructional texts that inherently 
      signals disagree? -->
 
 **The rule:**
+The final score is a weighted linear combination of the model predictability signal, the stylometric shape signal, and the repetition signal. When signals disagree (e.g., high model predictability but organic human sentence length variance and low repetition), the disagreeing signals dampen the outlier, pulling the composite score away from extreme thresholds and into the neutral "unsure" band.
 
 **The numbers:**
+- Weight on Model Signal (`WEIGHT_MODEL_SIGNAL`): **0.45**
+- Weight on Style Signal (`WEIGHT_STYLE_SIGNAL`): **0.35**
+- Weight on Repetition Signal (`WEIGHT_REPETITION_SIGNAL`): **0.20**
+- Thresholds: `HUMAN_THRESHOLD = 0.35`, `AI_THRESHOLD = 0.75`
 
 **Where it lives:** `scoring.py::combine_signals`
 
@@ -212,6 +231,12 @@ Legitimate technical, legal, scientific, or instructional texts that inherently 
      somewhere else, say where. -->
 
 **A case where my two signals split, and what my rule does with it:**
+Consider an ESL human writer writing plain, simple English:
+- `model_score = 0.86` (high predictability because vocabulary is simple and standard)
+- `style_score = 0.40` (varied sentence lengths and natural punctuation pacing)
+- `repetition_score = 0.25` (no robotic looping phrases)
+- Combined calculation: $(0.45 \times 0.86) + (0.35 \times 0.40) + (0.20 \times 0.25) = 0.387 + 0.140 + 0.050 = 0.577$.
+- **Result**: The combined score falls in the neutral `unsure` band ($0.35 < 0.577 < 0.75$). Even though the model signal alone was convinced the text was machine-written, the stylometric and repetition signals successfully rescued the author from a false accusation.
 
 
 
