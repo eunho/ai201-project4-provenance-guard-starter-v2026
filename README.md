@@ -365,15 +365,15 @@ $ curl "http://127.0.0.1:5000/log?limit=3"
 
 **Moment 1**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- *What I asked for:* Guidance and algorithms for calculating sentence length spread and stylometric metrics in `stylometry.py`.
+- *What came back:* A raw standard deviation implementation that crashed on single-sentence inputs (`statistics.stdev` requires at least two data points) and was unnormalized across different text lengths.
+- *What I changed:* Replaced the raw standard deviation with the coefficient of variation ($\sigma / \mu$) normalized by mean sentence length, added defensive guards for $\le 1$ sentence inputs returning a neutral fallback ($0.50$ AI likelihood), and flipped the scale so that low spread correctly corresponds to high AI predictability.
 
 **Moment 2**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- *What I asked for:* Strategy for computing confidence scores and mapping continuous composite scores to reader-facing labels.
+- *What came back:* A standard binary decision function with a single cutoff at $0.50$ that flipped between "human" and "AI", with a flat confidence calculation.
+- *What I changed:* Rejected binary flipping in favor of a three-tier decision system (`human`, `unsure`, `ai`) with a wide neutral safety band ($0.35\text{–}0.65$), added a non-linear `calculate_confidence` function where certainty scales with distance from decision thresholds (lowest in the ambiguous middle), and rewrote the "unsure" label in plain English to avoid accusatory phrasing toward authentic writers.
 
 <!-- ═══════════════════════ UNIT 8 — THE TEST ═══════════════════════ -->
 
