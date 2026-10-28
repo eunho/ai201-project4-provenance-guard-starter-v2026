@@ -42,61 +42,48 @@ Two things worth knowing before you pick numbers:
   a **miss**.
 
 ---
-## 1.
+## 1. False Positive Rate on Authentic Human Writing
 
-<!-- Your criterion. It must name a number. -->
-
-
+Across 20 distinct authentic human-written submissions (including at least 5 plain or ESL writing samples), at most 1 sample ($\le 5\%$) is classified as `high-confidence AI` (`guess == "ai"`).
 
 **Why this target:**
-
-
+Falsely accusing a human author of submitting AI-generated content inflicts severe damage: academic disciplinary action, loss of client trust, or public humiliation. A 5% upper ceiling across rigorous test trials forces the decision thresholds to route ambiguous, simple, or non-native writing into the neutral `unsure` category rather than making a reckless false accusation.
 
 ---
 
-## 2.
+## 2. Score Separation Between AI and Human Text
 
-<!-- Your criterion. -->
-
-
+The mean `combined_score` of 10 benchmark AI-generated articles and 10 benchmark human-authored articles must differ by at least 0.35 points on the 0.0–1.0 score continuum across all evaluation trials.
 
 **Why this target:**
-
-
+If the average scores of AI and human text differ by less than 0.35, the detector lacks adequate discriminatory separation, causing both classes to compress into overlapping bands. A minimum 0.35 spread ensures that high-confidence human writing and high-confidence AI writing occupy distinct ends of the spectrum, with `unsure` serving as an intentional buffer in the middle.
 
 ---
 
-## 3.
+## 3. Full Label Reachability (Zero Dead Zones)
 
-<!-- Your criterion. -->
-
-
+In an evaluation suite consisting of human-authored, mixed/edited, and synthetic AI inputs, all 3 output labels (`high-confidence human`, `unsure`, and `high-confidence AI`) must be produced at least 3 times each.
 
 **Why this target:**
-
-
+Verifies that the threshold configuration has no dead zones, unreachable ranges, or arithmetic edge-case cutoffs. A detector that never outputs `unsure` or fails to ever reach `high-confidence human` has defective thresholds that collapse complex probability into a binary coin toss.
 
 ---
 
-## 4.
+## 4. Deterministic Appeal Recording and State Transition
 
-<!-- Your criterion. -->
-
-
+100% (10 out of 10) of valid `POST /appeal` requests targeting existing `content_id`s must transition the submission status to `under_review` in `logs/audit.jsonl` and return an HTTP 200 response with confirmation data in under 200ms.
 
 **Why this target:**
-
-
+The appeal system is the sole due-process safeguard protecting writers against algorithmic misjudgment. If even a single appeal is dropped, fails silently, or fails to record to disk, an accused human writer is permanently disenfranchised with zero human recourse.
 
 ---
 
-## 5.
+## 5. Robust Rejection of Malformed and Boundary Inputs
 
-<!-- Your criterion. -->
-
-
+100% (10 out of 10) of invalid input scenarios (missing `text`, empty string `""`, non-string types, missing `creator_id`, or text exceeding 50,000 characters) must return a structured HTTP 400 Bad Request error with an informative error message, without raising an unhandled HTTP 500 exception or crashing the server.
 
 **Why this target:**
+Production services must never crash or leak internal tracebacks when receiving unexpected input. Explicitly rejecting malformed payloads guarantees that only verifiable, parseable submissions enter the evaluation pipeline and consume local model compute.
 
 
 
