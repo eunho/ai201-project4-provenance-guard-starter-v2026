@@ -70,7 +70,7 @@ WEIGHT_REPETITION_SIGNAL = 0.20
 # that decide who pays for it.
 
 HUMAN_THRESHOLD = 0.35
-AI_THRESHOLD = 0.75
+AI_THRESHOLD = 0.65
 
 # ⚠️ One thing that catches people out in Milestone 5. A weighted average can
 # only land between its two inputs — so while `style_signal` is still the stub

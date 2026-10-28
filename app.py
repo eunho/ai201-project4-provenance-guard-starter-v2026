@@ -36,6 +36,8 @@ import stylometry
 
 app = Flask(__name__)
 
+_verified_creators = set()
+
 
 # ── Rate limiting — UNIT 8 ────────────────────────────────────────────────────
 # Off until you turn it on. In unit 8, Milestone 1:
@@ -200,9 +202,12 @@ def submit():
     combined_score = scoring.combine_signals(model_score, style_score, rep_score)
 
     content_id = str(uuid.uuid4())
-    guess = "unsure"
-    confidence = 0.50
-    label = "Evaluation in progress (Milestone 4 placeholder)."
+    guess, label = scoring.score_to_label(combined_score)
+    confidence = scoring.calculate_confidence(combined_score, guess)
+
+    is_verified = creator_id in _verified_creators
+    if is_verified:
+        label = f"{label} [Verified Human Author]"
 
     audit.log_decision(
         content_id=content_id,
@@ -213,6 +218,7 @@ def submit():
         combined_score=combined_score,
         label=label,
         status="decided",
+        verified_creator=is_verified,
     )
 
     return jsonify({
@@ -225,37 +231,123 @@ def submit():
         "style_score": style_score,
         "combined_score": combined_score,
         "status": "decided",
+        "verified_creator": is_verified,
     }), 200
 
 
 @app.post("/appeal")
 def appeal():
     """
-    A writer says you got it wrong. ← TODO — Milestone 5
-
-    Expects JSON:
-        {"content_id": "...", "reasoning": "..."}
-
-    Should:
-      1. Check the content_id actually exists — `audit.entries_for(id)` tells
-         you. A typo here fails silently and looks like a broken endpoint,
-         which is the single most common way this milestone eats an hour.
-      2. Record the appeal with `audit.log_appeal(...)`, which moves the item
-         to `under_review`.
-      3. Confirm to the writer. No automatic re-checking needed.
-
-    This is the smallest endpoint in the project and the one that matters most
-    to the person on the other end. It's the only thing standing between a
-    wrong accusation and nothing at all.
+    A writer says you got it wrong.
     """
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({
+            "error": "bad_request",
+            "message": "Request body must be a JSON object.",
+        }), 400
 
-    # TODO: delete this and build the route.
+    content_id = payload.get("content_id")
+    reasoning = payload.get("reasoning")
+
+    if not isinstance(content_id, str) or not content_id.strip():
+        return jsonify({
+            "error": "bad_request",
+            "message": "'content_id' is required and must be a non-empty string.",
+        }), 400
+
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        return jsonify({
+            "error": "bad_request",
+            "message": "'reasoning' is required and must be a non-empty string.",
+        }), 400
+
+    entries = audit.entries_for(content_id)
+    if not entries:
+        return jsonify({
+            "error": "not_found",
+            "message": f"No submission found for content_id '{content_id}'. Check the ID and try again.",
+        }), 404
+
+    creator_id = entries[0].get("creator_id", "unknown")
+    appeal_entry = audit.log_appeal(
+        content_id=content_id,
+        creator_id=creator_id,
+        reasoning=reasoning.strip(),
+    )
+
     return jsonify({
-        "error": "not_implemented",
-        "message": "POST /appeal isn't built yet — see the TODO in app.py.",
-        "you_sent": payload,
-    }), 501
+        "ok": True,
+        "content_id": content_id,
+        "creator_id": creator_id,
+        "status": "under_review",
+        "message": "Appeal recorded successfully. This submission has been moved to under_review.",
+        "timestamp": appeal_entry.get("timestamp"),
+    }), 200
+
+
+# ── Stretch Features ─────────────────────────────────────────────────────────
+
+@app.get("/content/<content_id>")
+def get_content(content_id):
+    """
+    Stretch feature: Return one item's current status and audit history.
+    """
+    entries = audit.entries_for(content_id)
+    if not entries:
+        return jsonify({
+            "error": "not_found",
+            "message": f"No submission found for content_id '{content_id}'.",
+        }), 404
+
+    initial = entries[0]
+    latest = entries[-1]
+    status = latest.get("status", "decided")
+    creator_id = initial.get("creator_id")
+
+    return jsonify({
+        "content_id": content_id,
+        "creator_id": creator_id,
+        "status": status,
+        "guess": initial.get("guess"),
+        "confidence": initial.get("confidence", 0.5),
+        "label": initial.get("label"),
+        "model_score": initial.get("model_score"),
+        "style_score": initial.get("style_score"),
+        "combined_score": initial.get("combined_score"),
+        "verified_creator": creator_id in _verified_creators,
+        "history": entries,
+    }), 200
+
+
+@app.post("/verify-creator")
+def verify_creator():
+    """
+    Stretch feature: A writer earns a verified-human credential through an extra step.
+    """
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "bad_request", "message": "JSON body required."}), 400
+
+    creator_id = payload.get("creator_id")
+    if not isinstance(creator_id, str) or not creator_id.strip():
+        return jsonify({"error": "bad_request", "message": "'creator_id' is required."}), 400
+
+    creator = creator_id.strip()
+    _verified_creators.add(creator)
+    audit.log_decision(
+        content_id=f"cert_{creator}",
+        creator_id=creator,
+        status="verified_human",
+        event="creator_verified",
+        notes="Creator earned verified-human credential through attestation."
+    )
+    return jsonify({
+        "ok": True,
+        "creator_id": creator,
+        "status": "verified_human",
+        "message": f"Creator '{creator}' is now registered as a verified human author.",
+    }), 200
 
 
 # ── Already works ─────────────────────────────────────────────────────────────
