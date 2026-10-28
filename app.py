@@ -31,6 +31,8 @@ from flask import Flask, jsonify, request
 import audit
 import config
 import detector
+import scoring
+import stylometry
 
 app = Flask(__name__)
 
@@ -193,12 +195,14 @@ def submit():
             "message": str(exc),
         }), 400
 
+    style_score = stylometry.style_signal(text)
+    rep_score = stylometry.repetition_signal(text)
+    combined_score = scoring.combine_signals(model_score, style_score, rep_score)
+
     content_id = str(uuid.uuid4())
     guess = "unsure"
     confidence = 0.50
-    label = "Evaluation in progress (Milestone 3 placeholder)."
-    style_score = 0.0
-    combined_score = model_score
+    label = "Evaluation in progress (Milestone 4 placeholder)."
 
     audit.log_decision(
         content_id=content_id,

@@ -19,44 +19,35 @@ you claim, so that line should read `scoring.py::combine_signals`.
 import config
 
 
-def combine_signals(model_score: float, style_score: float) -> float:
+def combine_signals(
+    model_score: float,
+    style_score: float,
+    repetition_score: float | None = None,
+) -> float:
     """
-    Combine two 0–1 signals into one 0–1 score. ← TODO (Milestone 4)
-
-    Both inputs point the same way: higher means more likely AI. Your output
-    should too.
+    Combine signals into one 0–1 score. Higher means more likely AI.
 
     Args:
         model_score: from `detector.model_signal` — how predictable the text is.
         style_score: from `stylometry.style_signal` — the shape of the text.
+        repetition_score: from `stylometry.repetition_signal` — token repetition & markers.
 
     Returns:
         A float from 0.0 (confidently human) to 1.0 (confidently AI).
-
-    ⚠️ **Write the rule down before you code it, and put the numbers in your
-    README.** A weighted average is the obvious choice and it is not the only
-    one. Things worth thinking about:
-
-      - **What happens when they disagree?** One signal at 0.9 and the other at
-        0.1 averages to 0.5 — "unsure". Is that what you want? It might be
-        exactly right: two methods disagreeing IS uncertainty. Or you might
-        decide one signal is more trustworthy when they split.
-
-      - **Which way do you want to be wrong?** Weighting toward the signal that
-        reads more human means fewer false accusations and more AI text
-        getting through. There's no weighting that avoids the trade.
-
-      - Milestone 4 asks you to find a case where your two signals split and
-        write it down. That case is what this rule exists to handle.
-
-    The weights in config.py are placeholders. Change them, or ignore them and
-    write a different rule.
     """
-    # TODO: replace this
-    return (
-        config.WEIGHT_MODEL_SIGNAL * model_score
-        + config.WEIGHT_STYLE_SIGNAL * style_score
-    )
+    if repetition_score is not None:
+        raw = (
+            config.WEIGHT_MODEL_SIGNAL * model_score
+            + config.WEIGHT_STYLE_SIGNAL * style_score
+            + getattr(config, "WEIGHT_REPETITION_SIGNAL", 0.20) * repetition_score
+        )
+    else:
+        total = config.WEIGHT_MODEL_SIGNAL + config.WEIGHT_STYLE_SIGNAL
+        w_model = config.WEIGHT_MODEL_SIGNAL / total
+        w_style = config.WEIGHT_STYLE_SIGNAL / total
+        raw = w_model * model_score + w_style * style_score
+
+    return round(min(max(raw, 0.0), 1.0), 4)
 
 
 def score_to_label(score: float) -> tuple[str, str]:
