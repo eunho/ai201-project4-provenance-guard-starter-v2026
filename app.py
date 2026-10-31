@@ -213,6 +213,7 @@ def submit():
         content_id=content_id,
         creator_id=creator_id,
         guess=guess,
+        confidence=confidence,
         model_score=model_score,
         style_score=style_score,
         combined_score=combined_score,
