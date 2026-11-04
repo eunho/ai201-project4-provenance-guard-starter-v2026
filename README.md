@@ -396,22 +396,19 @@ All three stretch features for Unit 8 are declared here before starting the mile
 
 ## Rate Limiting
 
-**My limits:** ___ per minute, ___ per day
+**My limits:** 10 per minute, 200 per day
 
 **Why those numbers and not others:**
-<!-- Think about two people: a real writer submitting their own work a few
-     times an hour, and a script sending a thousand variations to map your
-     thresholds. Your numbers have to be liveable for the first and hostile to
-     the second. -->
+A genuine human author submits or tests text a few times an hour, occasionally bursting 2–4 submissions in a minute when testing revisions or paragraph variants. A limit of 10 requests per minute and 200 per day is generous enough that an honest user never notices throttling during real writing tasks. Conversely, automated attackers and black-box probe scripts attempting to map model decision boundaries or brute-force evasion permutations must send dozens or hundreds of variations rapidly; 10/minute cuts off automated probing immediately. Additionally, because token perplexity evaluation on local GPT-2 takes 1–2 seconds of compute per submission, capping throughput at 10/min and 200/day protects server resources from CPU/memory denial-of-service exhaustion.
 
-**What a caller counts as:** `creator_id` (per-creator limiting), with fallback to `get_remote_address()` for missing/unparseable identity. (See full analysis in Stretch Features section above).
+**What a caller counts as:** `creator_id` (per-creator limiting), with fallback to `get_remote_address()` for missing/unparseable identity. (See full comparative analysis in Stretch Features section above).
 
 **The run of status codes when I pushed past it:**
 
 <!-- python run_attacks.py --flood 15 -->
 
 ```
-
+200 200 200 200 200 200 200 200 200 200 429 429 429 429 429
 ```
 
 ---
@@ -530,9 +527,9 @@ that produced it:
 
      SUBMISSION CHECKLIST — unit 8
 
-       [ ] Rate limiting on /submit, with your numbers justified
-       [ ] The pasted run of status codes showing 429
-       [ ] Audit log with all nine fields, recording rejections too
+       [x] Rate limiting on /submit, with your numbers justified
+       [x] The pasted run of status codes showing 429
+       [x] Audit log with all nine fields, recording rejections too
        [ ] The attack set run IN FULL, every input with an outcome
        [ ] Ten audit log entries pasted as text
        [ ] Five criteria across three trials

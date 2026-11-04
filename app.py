@@ -156,13 +156,14 @@ def health():
 # ── YOU BUILD THIS ────────────────────────────────────────────────────────────
 
 @app.post("/submit")
-# @limiter.limit(f"{config.RATE_LIMIT_PER_MINUTE}/minute;{config.RATE_LIMIT_PER_DAY}/day")
+@limiter.limit(f"{config.RATE_LIMIT_PER_MINUTE}/minute;{config.RATE_LIMIT_PER_DAY}/day")
 def submit():
     """
     Take a piece of text, decide about it, log the decision, answer.
     """
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
+        audit.log_rejection(creator_id="unknown", reason="malformed_json")
         return jsonify({
             "error": "bad_request",
             "message": "Request body must be a JSON object.",
@@ -172,18 +173,22 @@ def submit():
     creator_id = payload.get("creator_id")
 
     if not isinstance(text, str) or not text.strip():
+        cid = creator_id if isinstance(creator_id, str) and creator_id.strip() else "unknown"
+        audit.log_rejection(creator_id=cid, reason="missing_or_empty_text")
         return jsonify({
             "error": "bad_request",
             "message": "'text' field is required and must be a non-empty string.",
         }), 400
 
     if not isinstance(creator_id, str) or not creator_id.strip():
+        audit.log_rejection(creator_id="unknown", reason="missing_or_empty_creator_id")
         return jsonify({
             "error": "bad_request",
             "message": "'creator_id' field is required and must be a non-empty string.",
         }), 400
 
     if len(text) > 50000:
+        audit.log_rejection(creator_id=creator_id, reason="text_too_long", length=len(text))
         return jsonify({
             "error": "bad_request",
             "message": f"'text' exceeds maximum length of 50,000 characters ({len(text)} chars).",
@@ -192,6 +197,7 @@ def submit():
     try:
         model_score = detector.model_signal(text)
     except ValueError as exc:
+        audit.log_rejection(creator_id=creator_id, reason="detector_error", error=str(exc))
         return jsonify({
             "error": "bad_request",
             "message": str(exc),
