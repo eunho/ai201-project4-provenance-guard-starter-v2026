@@ -764,19 +764,81 @@ A clear systemic pattern connects these failures: **surface-level syntactic nois
 ## The Improvement
 
 **What I changed:**
+Moved the high-confidence AI decision threshold (`AI_THRESHOLD`) in `config.py` from `0.65` up to `0.70`, expanding the neutral `unsure` safety band from $[0.35, 0.65]$ (width 0.30) to $[0.35, 0.70]$ (width 0.35).
 
 **Which diagnosis pointed at it:**
+Diagnosis 1 & 2 on the False Positive family (`FP05` and `FP07`). Authentic technical documentation in `FP05` scored `0.6419`—less than $0.009$ away from the previous $0.65$ cutoff. Setting the boundary at $0.65$ left zero margin of error for disciplined, grammatically consistent human writers. Widening the band expands the safety margin to $0.0581$ ($>500\%$ larger safety buffer).
 
 ### Attack Run — After
 
 <!-- Same format. `run_attacks.py --label after` -->
 
+- **Total Attacks**: 56
+- **HELD**: 40
+- **BROKE**: 16
+- **Auto-marked BROKE (5xx crashes)**: 0
 
+| ID | Family | Targeting | Status | Content ID | Guess | Score | Verdict |
+|---|---|---|---|---|---|---|---|
+| EV01 | evasion | signal two: typos raise word variety | 200 | `e4ef5e04-45c1-45a8-81dd-9afa39f03f04` | human | 0.780 | BROKE |
+| EV02 | evasion | signal two: broken-up sentences raise length spread | 200 | `a4bc5c95-d117-48bd-9852-786d14269f3b` | human | 0.750 | BROKE |
+| EV03 | evasion | signal two: a pasted quotation changes the shape | 200 | `caf92bda-460d-40dc-bce5-759a8a651713` | unsure | 0.600 | BROKE |
+| EV04 | evasion | signal one: unusual words raise perplexity | 200 | `dcce1e9f-fc38-44a9-8eec-0aabfe6bc003` | unsure | 0.520 | BROKE |
+| EV05 | evasion | both signals: heavy human editing pass | 200 | `bd6f583b-fa0e-46de-ad1b-d3687a6f6992` | human | 0.840 | BROKE |
+| EV06 | evasion | signal two: one very long sentence and one very short | 200 | `53be521e-c53b-487b-9c0e-71b7edac9aaa` | unsure | 0.610 | BROKE |
+| EV07 | evasion | signal two: padding with punctuation | 200 | `c59cfbb9-3c80-4378-8a2e-043026090fc8` | unsure | 0.480 | BROKE |
+| EV08 | evasion | signal one: text below the token window | 200 | `90eb0e7d-46ac-499f-8106-6e7aa827b9b0` | human | 0.780 | BROKE |
+| EV09 | evasion | both: AI text with a human opening paragraph bolted on | 200 | `6ad8e37f-f9c6-4e38-ac51-e19a199615d8` | unsure | 0.570 | BROKE |
+| EV10 | evasion | signal two: repeated stanza structure | 200 | `927df89e-9abc-4bc4-b699-32762df35194` | ai | 0.750 | HELD |
+| FP01 | false_positive | plain, clear human writing with no flourishes | 200 | `9ea0d28e-26cf-452c-a3ba-270fc9d03d7e` | unsure | 0.560 | HELD |
+| FP02 | false_positive | human writing in a formal register | 200 | `ec6b770c-4919-4f25-9453-563baa2d0618` | unsure | 0.450 | HELD |
+| FP03 | false_positive | a non-native English speaker writing carefully | 200 | `757d424a-6536-4c51-a8b3-060cad02244c` | unsure | 0.420 | HELD |
+| FP04 | false_positive | a student essay written to a rubric | 200 | `db8af576-a1b4-42e3-bffb-1e69f7d0d9ce` | unsure | 0.490 | HELD |
+| FP05 | false_positive | technical documentation written by a person | 200 | `870e38bb-e72c-4537-a240-f2ab0d9e331e` | unsure | 0.570 | HELD |
+| FP06 | false_positive | a person imitating a formal template | 200 | `d2d5df6b-a9a3-4bfe-bea6-314bb2db78a4` | unsure | 0.410 | HELD |
+| FP07 | false_positive | human writing that repeats a phrase deliberately | 200 | `60ce30f5-15b8-4683-b54e-9dcc59b263ee` | unsure | 0.560 | HELD |
+| FP08 | false_positive | very short genuine human submission | 200 | `12705947-c7df-4347-9ba9-0067e9171782` | human | 0.790 | HELD |
+| PI01 | prompt_injection | instruction to ignore the check | 200 | `2432e24c-8f4c-4af2-b708-040867c45fa1` | human | 0.770 | BROKE |
+| PI02 | prompt_injection | instruction disguised as a system message | 200 | `2fcfffa4-c2d6-418e-8608-f1c6660819f7` | human | 0.880 | BROKE |
+| PI03 | prompt_injection | instruction wrapped in the writer's voice | 200 | `0d2dbac3-c0a1-4741-8c9c-df3a9851aedd` | unsure | 0.590 | BROKE |
+| PI04 | prompt_injection | attempt to make the label text hostile | 200 | `baf039bd-3f73-405d-87b8-02f04a3507b8` | human | 0.710 | BROKE |
+| PI05 | prompt_injection | attempt to inject into the audit log | 200 | `999359b8-7657-4cb9-825a-dd4c57f8fbac` | unsure | 0.610 | HELD |
+| PI06 | prompt_injection | instruction plus real human text | 200 | `d748b8a9-15c2-4d1a-8ecf-87f7ecd543e4` | unsure | 0.590 | BROKE |
+| MF01 | malformed | text is only whitespace | 400 | `—` | — | — | HELD |
+| MF02 | malformed | text is a single character | 400 | `—` | — | — | HELD |
+| MF03 | malformed | text is control characters | 200 | `63d702b7-9bb1-46a0-a14e-78e0dcc58e8a` | human | 0.790 | BROKE |
+| MF04 | malformed | text is only punctuation | 200 | `12525322-b9e6-49fa-a67a-8fe7b838b527` | unsure | 0.580 | BROKE |
+| MF05 | malformed | text is a very long single word | 200 | `4e4f70c8-1434-4277-8424-9fc4d1402342` | unsure | 0.640 | BROKE |
+| MF06 | malformed | text is emoji only | 200 | `4388c43e-6ffa-410b-bd91-e4df011f9e90` | ai | 0.780 | BROKE |
+| MF07 | malformed | text is right-to-left script | 200 | `302bed4b-b012-4971-a7d9-1249376281fc` | ai | 0.740 | BROKE |
+| MF08 | malformed | text is 60,000 characters | 400 | `—` | — | — | HELD |
+| RQ01 | malformed | no text field at all | 400 | `—` | — | — | HELD |
+| RQ02 | malformed | no creator_id | 400 | `—` | — | — | HELD |
+| RQ03 | malformed | text is a number | 400 | `—` | — | — | HELD |
+| RQ04 | malformed | text is a list | 400 | `—` | — | — | HELD |
+| RQ05 | malformed | text is null | 400 | `—` | — | — | HELD |
+| RQ06 | malformed | creator_id is an object | 400 | `—` | — | — | HELD |
+| RQ07 | malformed | body is a JSON array, not an object | 400 | `—` | — | — | HELD |
+| RQ08 | malformed | body is unparseable JSON | 400 | `—` | — | — | HELD |
+| RQ09 | malformed | body is empty | 400 | `—` | — | — | HELD |
+| RQ10 | malformed | body is form-encoded, not JSON | 400 | `—` | — | — | HELD |
+| RQ11 | malformed | body is JSON claiming to be plain text | 400 | `—` | — | — | HELD |
+| RQ12 | malformed | deeply nested JSON | 400 | `—` | — | — | HELD |
+| FL01_01 | flood_same_creator | 20 rapid submissions from one creator | 200 | `494da5ee-829c-48ae-98b5-9171fdac4b70` | human | 0.870 | HELD |
+| FL01_02 | flood_same_creator | 20 rapid submissions from one creator | 200 | `8be537c3-a48b-49f6-8ef1-91c94139bb34` | human | 0.870 | HELD |
+| FL01_03 | flood_same_creator | 20 rapid submissions from one creator | 200 | `5f68342f-2144-4255-9f49-533f7b80fe7e` | human | 0.870 | HELD |
+| FL01_04 | flood_same_creator | 20 rapid submissions from one creator | 200 | `bab6397d-0453-4211-9d37-695258a99a08` | human | 0.870 | HELD |
+| FL01_05 | flood_same_creator | 20 rapid submissions from one creator | 200 | `3402b0de-31cb-4627-9685-9615c1c68c82` | human | 0.870 | HELD |
+| FL01_06 | flood_same_creator | 20 rapid submissions from one creator | 200 | `06416106-d1ee-46fc-a3c1-10c28c07dd52` | human | 0.870 | HELD |
+| FL01_07 | flood_same_creator | 20 rapid submissions from one creator | 200 | `73c42ac2-1057-4f0b-9894-89262940b902` | human | 0.870 | HELD |
+| FL01_08 | flood_same_creator | 20 rapid submissions from one creator | 200 | `ab3284a1-7411-4993-a03f-2b6b8b32751e` | human | 0.870 | HELD |
+| FL01_09 | flood_same_creator | 20 rapid submissions from one creator | 200 | `e4921d90-8517-4755-8b20-6e8a6cdc23b7` | human | 0.870 | HELD |
+| FL01_10 | flood_same_creator | 20 rapid submissions from one creator | 200 | `88b1fccf-1dd0-47c3-b536-f89444901e98` | human | 0.870 | HELD |
+| FL01_11 | flood_same_creator | 20 rapid submissions from one creator | 429 | `—` | — | — | HELD |
+| FL01_12 | flood_same_creator | 20 rapid submissions from one creator | 429 | `—` | — | — | HELD |
 
 **Did it help, and how do I know:**
-
-<!-- Widening the unsure band usually fixes one problem and creates another.
-     Reporting that trade honestly is worth full credit. -->
+Yes, it helped directly by eliminating the dangerous false-positive edge case on authentic technical writing (`FP05`'s distance from accusation expanded from $0.0081$ to $0.0581$, a $>500\%$ increase in margin), while keeping formulaic AI repetition (`EV10` at $0.7498 \ge 0.70$) firmly classified as AI. However, the fundamental trade-off is that widening the unsure band makes high-confidence AI detection harder: AI text scoring in the $0.65\text{--}0.70$ band now avoids an automated AI verdict and lands in `unsure`, reflecting the classic production compromise that avoiding wrongful human accusations reduces automated detection sensitivity.
 
 
 
@@ -821,7 +883,7 @@ A clear systemic pattern connects these failures: **surface-level syntactic nois
        [x] Ten audit log entries pasted as text
        [x] Five criteria across three trials
        [x] A diagnosis for every miss and every broken attack — stage AND mechanism
-       [ ] One improvement, with Attack Run — After
+       [x] One improvement, with Attack Run — After
        [ ] What's Still Broken, including the production trade
        [ ] At least four new commits
        [ ] The SAME repository URL as last unit
