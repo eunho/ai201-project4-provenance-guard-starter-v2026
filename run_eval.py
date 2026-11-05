@@ -116,24 +116,46 @@ def main():
             for i, body in enumerate(bodies_for(scenario), 1):
                 preview = describe(body)
                 try:
-                    response = requests.post(f"{args.url}/submit", json=body,
-                                             timeout=args.timeout)
-                    payload = response.json() if response.content else {}
-                    results.append({
-                        "status": response.status_code,
-                        "guess": payload.get("guess"),
-                        "confidence": payload.get("confidence"),
-                        "model_score": payload.get("model_score"),
-                        "style_score": payload.get("style_score"),
-                        "label": payload.get("label"),
-                        "sent": preview,
-                    })
+                    endpoint = scenario.get("endpoint", "/submit")
+                    if endpoint == "/appeal":
+                        sub_res = requests.post(
+                            f"{args.url}/submit",
+                            json={"text": body.get("text", f"Submission for appeal test {i}."), "creator_id": body.get("creator_id", f"appeal_user_{i}")},
+                            timeout=args.timeout,
+                        )
+                        sub_data = sub_res.json() if sub_res.content else {}
+                        cid = sub_data.get("content_id")
+                        appeal_payload = {"content_id": cid, "reasoning": body.get("reasoning", "I wrote this myself.")}
+                        response = requests.post(f"{args.url}/appeal", json=appeal_payload, timeout=args.timeout)
+                        payload = response.json() if response.content else {}
+                        results.append({
+                            "status": response.status_code,
+                            "content_id": payload.get("content_id"),
+                            "appeal_status": payload.get("status"),
+                            "ok": payload.get("ok"),
+                            "message": payload.get("message"),
+                            "sent": preview,
+                        })
+                    else:
+                        response = requests.post(f"{args.url}/submit", json=body,
+                                                 timeout=args.timeout)
+                        payload = response.json() if response.content else {}
+                        results.append({
+                            "status": response.status_code,
+                            "guess": payload.get("guess"),
+                            "confidence": payload.get("confidence"),
+                            "model_score": payload.get("model_score"),
+                            "style_score": payload.get("style_score"),
+                            "combined_score": payload.get("combined_score"),
+                            "label": payload.get("label"),
+                            "sent": preview,
+                        })
                 except Exception as exc:  # noqa: BLE001
                     results.append({"status": None, "error": f"{type(exc).__name__}: {exc}",
                                     "sent": preview})
 
             trials.append(results)
-            guesses = [r.get("guess") or "—" for r in results]
+            guesses = [r.get("guess") or r.get("appeal_status") or str(r.get("status")) or "—" for r in results]
             print(f"  trial {trial}: {', '.join(guesses)}")
 
         rows.append({"scenario": scenario, "trials": trials})
