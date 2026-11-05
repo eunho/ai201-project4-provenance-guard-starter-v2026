@@ -711,6 +711,52 @@ that produced it:
 
      Look for a pattern. Five failures on one signal is one problem, not five. -->
 
+### 1. Diagnosis of Criteria Outcomes
+
+- **Criterion 1: False Positive Rate on Authentic Human Writing — MET**
+  - *Decision rationale*: 0 out of 20 authentic human submissions (0.0%) across all three trials were classified as `high-confidence AI`, comfortably beating our $\le 5\%$ ($\le 1/20$) target. Setting `AI_THRESHOLD = 0.65` and weighting human stylometric variance provided a safe buffer that routed all difficult ESL samples into `unsure` rather than issuing false accusations.
+- **Criterion 2: Score Separation Between AI and Human Text — MISSED**
+  - *Decision rationale*: Target required a mean difference $\ge 0.35$ between benchmark AI and human articles. Across all three trials, the separation achieved was only $0.1269$ (AI mean of $0.4145$ vs. Human mean of $0.2876$).
+  - *Stage*: Combining rule (`scoring.py::combine_signals`) and Signal 2 (`stylometry.py::style_signal`).
+  - *Mechanism*: Standard AI texts that lack repetitive loop structures receive `repetition_score = 0.0`, while their grammatically correct syntax produces moderate `style_score` values ($0.38\text{--}0.42$). When blended via the linear weighted combiner ($0.45 \times \text{model} + 0.35 \times \text{style} + 0.20 \times \text{repetition}$), the high model predictability score ($0.74\text{--}0.85$) is heavily diluted and dragged down to $\approx 0.41$. This compression prevents standard AI text from separating cleanly from human text ($0.2876$), causing a shortfall of $0.2231$ against the $0.35$ target.
+- **Criterion 3: Full Label Reachability (Zero Dead Zones) — MET**
+  - *Decision rationale*: In all three trials, all three labels were reached at least 3 times (3 `human`, 3 `unsure`, 3 `ai`). The decision thresholds ($0.35$ and $0.65$) have no dead zones.
+- **Criterion 4: Deterministic Appeal Recording and State Transition — MET**
+  - *Decision rationale*: 10 out of 10 valid appeal requests (100%) transitioned submission state to `under_review`, appended to `logs/audit.jsonl`, and returned HTTP 200 in under 30ms across all trials.
+- **Criterion 5: Robust Rejection of Malformed and Boundary Inputs — MET**
+  - *Decision rationale*: 10 out of 10 invalid payload variants (100%) were rejected with structured HTTP 400 Bad Request responses and logged under `event: rejected` without crashing the server.
+
+---
+
+### 2. Diagnosis of Broken Attack Families (Stage & Mechanism)
+
+- **Evasion via Typos & Token Shattering (`EV01`)**:
+  - *Stage*: Signal 1 (`detector.py`) and Signal 2 (`stylometry.py`).
+  - *Mechanism*: The attacker injected deliberate typos into AI prose. In Signal 1, GPT-2's Byte-Pair Encoding (BPE) tokenizer cannot recognize misspelled words as single vocabulary tokens, shattering them into obscure subword chunks. This artificially spiked token cross-entropy loss, collapsing `model_score` from $0.78$ down to $0.1635$. In Signal 2, unique misspellings inflated the type-token ratio (`type_token_ratio`), falsely signaling human lexical diversity. Weighted together, the composite score crashed to $0.2560$, flipping the verdict to `human`.
+- **Evasion via Sentence Fragmentation & Artificial Variance (`EV02`, `EV06`)**:
+  - *Stage*: Signal 2 (`stylometry.py::style_signal`).
+  - *Mechanism*: The attacker inserted arbitrary periods into AI text to create alternating short fragments and long clauses. Signal 2 evaluates `sentence_length_spread` using the coefficient of variation ($\sigma / \mu$); artificial fragmentation drove length variation up, plunging `style_score` to $0.0774$ (`EV02`). Weighted at $0.35$, this single metric dragged the combined score down to $0.2945$ (`human`).
+- **Evasion via Human Quotes and Bolted Context (`EV03`, `EV04`, `EV07`, `EV09`)**:
+  - *Stage*: Combining rule (`scoring.py::combine_signals`) and Label mapping (`scoring.py::score_to_label`).
+  - *Mechanism*: Bolting an authentic human quotation or introductory paragraph dilute average token predictability over the sequence window. Signal 1 decreased to $0.57\text{--}0.66$, and the quotation altered length variance ($0.25\text{--}0.38$). The linear combination landed between $0.45\text{--}0.59$, escaping the $\ge 0.65$ AI threshold into `unsure`.
+- **Prompt Injection Perplexity Distortion (`PI01`, `PI02`, `PI04`, `PI06`)**:
+  - *Stage*: Signal 1 (`detector.py::model_signal`) and Signal 2 (`stylometry.py`).
+  - *Mechanism*: While our local causal LM does not follow system instructions, injecting meta-instruction prompts (`SYSTEM INSTRUCTION OVERRIDE: ...`) introduces unusual capitalized syntax, colons, and meta-phrasing. This vocabulary distribution has low probability under GPT-2, driving perplexity high (`model_score` dropped to $0.2044$ on `PI02`), causing the system to label prompt injections as `human` with 0.88 confidence.
+- **Non-Linguistic Malformed Requests (`MF03`–`MF07`)**:
+  - *Stage*: Route ingress validation (`app.py::submit`).
+  - *Mechanism*: The ingress handler validated that `text` was a non-empty string under 50,000 characters, but failed to validate character hygiene (e.g. rejecting non-printable control characters, standalone punctuation, or zero alphabetic tokens). As a result, control characters (`MF03`) and punctuation-only text (`MF04`) reached the scoring pipeline with 200 OK responses instead of being rejected upfront with HTTP 400.
+
+---
+
+### 3. Pattern Across Misses
+
+A clear systemic pattern connects these failures: **surface-level syntactic noise disproportionately corrupts both statistical signals, and the linear combining rule allows a single distorted signal to drag down the entire composite score.**
+- Both token perplexity (Signal 1) and stylometric spread (Signal 2) assume clean, standard English text. Any perturbation—typos, inserted periods, zero-width characters, or conversational fragments—artificially lowers AI predictability and explodes variance.
+- Because `scoring.py::combine_signals` uses a simple linear weighted sum with fixed weights ($0.45 / 0.35 / 0.20$), an attacker who manipulates Signal 2 down to $0.07$ successfully drags an AI text with high model predictability ($0.60$) down into the `human` category ($0.29$).
+- To fix this vulnerability, the system requires either:
+  1. Recalibrating the combining rule so high model predictability cannot be completely overridden by manipulated stylometry, or
+  2. Introducing adversarial input normalization upstream (stripping control chars, normalizing typos/whitespace) before signals evaluate the text.
+
 
 
 ---
@@ -774,7 +820,7 @@ that produced it:
        [x] The attack set run IN FULL, every input with an outcome
        [x] Ten audit log entries pasted as text
        [x] Five criteria across three trials
-       [ ] A diagnosis for every miss and every broken attack — stage AND mechanism
+       [x] A diagnosis for every miss and every broken attack — stage AND mechanism
        [ ] One improvement, with Attack Run — After
        [ ] What's Still Broken, including the production trade
        [ ] At least four new commits
