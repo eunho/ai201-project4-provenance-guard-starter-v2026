@@ -362,6 +362,18 @@ $ curl "http://127.0.0.1:5000/log?limit=2"
 - *What came back:* A standard binary decision function with a single cutoff at $0.50$ that flipped between "human" and "AI", with a flat confidence calculation.
 - *What I changed:* Rejected binary flipping in favor of a three-tier decision system (`human`, `unsure`, `ai`) with a wide neutral safety band ($0.35\text{–}0.65$), added a non-linear `calculate_confidence` function where certainty scales with distance from decision thresholds (lowest in the ambiguous middle), and rewrote the "unsure" label in plain English to avoid accusatory phrasing toward authentic writers.
 
+**Moment 3 (Unit 8 — Rate Limiter Key & Rejection Tracking)**
+
+- *What I asked for:* How to implement per-creator rate limiting on `/submit` with fallback to IP address and audit logging.
+- *What came back:* A key function using `request.get_json()["creator_id"]` that crashed with an uncaught `TypeError` / `AttributeError` whenever a request sent non-dict JSON (such as a bare list or string) or an empty body.
+- *What I changed:* Added defensive guards checking `isinstance(payload, dict)` and validating string types before accessing `creator_id`, falling back gracefully to `get_remote_address()` for anonymous or malformed traffic. In addition, connected route 400 bad request returns directly into `audit.log_rejection` so non-compliant requests leave persistent audit traces.
+
+**Moment 4 (Unit 8 — Improvement Trade-off Analysis)**
+
+- *What I asked for:* Guidance on whether to aggressively increase the model signal weight or adjust classification thresholds to mitigate evasion attacks.
+- *What came back:* An aggressive suggestion to raise `WEIGHT_MODEL_SIGNAL` to $0.70$ to overpower stylometric manipulation.
+- *What I changed:* Evaluated the suggested weight change against the full test suite and discovered it immediately caused authentic ESL writing (`FP03`) and technical documentation (`FP05`) to cross the $0.65$ threshold into false AI accusations. Rejected the weight increase in favor of widening `AI_THRESHOLD` to $0.70$, explicitly choosing to prioritize false-positive protection for human writers over aggressive detection sensitivity.
+
 <!-- ═══════════════════════ UNIT 8 — THE TEST ═══════════════════════ -->
 
 ### Declared Stretch Features (Unit 8 — Planned Upfront)
@@ -849,14 +861,42 @@ Yes, it helped directly by eliminating the dangerous false-positive edge case on
 <!-- For each attack still getting through and each criterion still missed:
      what you'd do, and why you stopped. -->
 
+### 1. Attacks Still Getting Through
 
+- **Typos and Subword Token Shattering (`EV01`)**:
+  - *What's still happening*: Deliberate typos in AI text force GPT-2's BPE tokenizer to fragment common words into obscure subwords, driving token perplexity loss up and falsely scoring as `human` (`combined_score = 0.2560`).
+  - *What I'd do*: Add an automated spell-correction / subword normalization pass (e.g. SymSpell or edit-distance dictionary lookup) upstream of `detector.py` to restore words to standard orthography before evaluating token probabilities.
+  - *Why I stopped*: Adding dictionary dependencies and token preprocessors constitutes an architectural pipeline change that violated Unit 8's strict "one improvement" rule.
+- **Sentence Fragmentation Evasion (`EV02`, `EV06`)**:
+  - *What's still happening*: Inserting arbitrary periods splits paragraphs into uneven staccato fragments, inflating sentence length variance and dropping `style_score` to $0.0774$ (`EV02`).
+  - *What I'd do*: Replace naive period-splitting with syntactic dependency parsing (e.g. spaCy) that identifies complete clauses containing verbs, measuring cadence across clauses rather than raw punctuation marks.
+  - *Why I stopped*: Adding heavy NLP parsing libraries was outside this unit's scope and exceeded the single-improvement mandate.
+- **Context Bolting & Padding (`EV03`, `EV04`, `EV07`, `EV09`)**:
+  - *What's still happening*: Embedding human quotations or intro paragraphs dilutes average sequence loss, keeping composite scores in the neutral `unsure` band ($0.48\text{--}0.60$).
+  - *What I'd do*: Implement sliding-window token evaluation (scoring overlapping 100-token chunks and taking the 90th percentile predictability rather than the global mean loss) to expose AI paragraphs hidden within human text.
+  - *Why I stopped*: Sliding-window inference triples local CPU evaluation time, risking timeout limits under our 1-2 second per-request performance target.
+- **Prompt Injection Perplexity Skewing (`PI01`, `PI02`, `PI04`, `PI06`)**:
+  - *What's still happening*: Injecting pseudo-system instruction headers introduces uncommon uppercase metadata tokens that skew perplexity, scoring as `human` or `unsure`.
+  - *What I'd do*: Add regex pre-filtering to strip prompt-directive metadata patterns (`SYSTEM:`, `OVERRIDE:`, `IGNORE INSTRUCTIONS:`) before computing perplexity.
+  - *Why I stopped*: Exceeded the single allowed improvement.
+- **Non-Linguistic Malformed Requests (`MF03`, `MF04`, `MF06`, `MF07`)**:
+  - *What's still happening*: Control characters (`MF03`) and punctuation-only inputs (`MF04`) return HTTP 200 rather than being rejected with HTTP 400.
+  - *What I'd do*: Add character hygiene validation in `app.py::submit` (`re.search(r'[A-Za-z]{2,}', text)`) to immediately reject text lacking printable linguistic words.
+  - *Why I stopped*: The assignment strictly restricted system changes in this unit to the rate limiter, audit log, and one improvement.
+
+### 2. Criteria Still Missed
+
+- **Criterion 2 (Score Separation Between AI and Human Text)**:
+  - *Target*: Mean score separation $\ge 0.35$; *Achieved*: $0.1269$ (AI mean of $0.4145$ vs Human mean of $0.2876$).
+  - *Why missed*: AI writing without looping stanzas receives `repetition_score = 0.0` and standard stylometry ($\approx 0.40$), diluting model perplexity ($0.75+$) down to $\approx 0.41$.
+  - *What I'd do*: Apply a non-linear sigmoid rescale to model perplexity and condition the repetition signal so it only activates when repetitive structures are actually present, rather than pulling down the score when absent.
+  - *Why I stopped*: Changing the mathematical fusion formula was ruled out in favor of the threshold widening improvement.
+
+---
 
 **The trade I'd make if this ran for real:**
 
-<!-- Two sentences. Fewer wrong accusations means more AI text getting through.
-     Say which way you'd go and WHO PAYS FOR IT. -->
-
-
+If this service ran in production, I would strictly prioritize preventing false positive accusations over catching every piece of AI text, keeping the high-confidence AI threshold set high ($\ge 0.70$) and routing all ambiguous or non-native writing into the neutral `unsure` category. The platform and its human reviewers pay the operational cost of manually reviewing appeals and borderline content, because that burden is vastly preferable to an innocent human author paying the devastating personal and professional price of a false automated accusation.
 
 <!-- ═════════════════════════════════════════════════════════════════════
 
@@ -884,9 +924,9 @@ Yes, it helped directly by eliminating the dangerous false-positive edge case on
        [x] Five criteria across three trials
        [x] A diagnosis for every miss and every broken attack — stage AND mechanism
        [x] One improvement, with Attack Run — After
-       [ ] What's Still Broken, including the production trade
-       [ ] At least four new commits
-       [ ] The SAME repository URL as last unit
+       [x] What's Still Broken, including the production trade
+       [x] At least four new commits
+       [x] The SAME repository URL as last unit
 
      Do not delete and recreate this repository.
      ═════════════════════════════════════════════════════════════════════ -->
