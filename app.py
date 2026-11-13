@@ -205,8 +205,14 @@ def submit():
             "message": hygiene_err,
         }), 400
 
+    # ── Adversarial prompt-injection pre-filtering & neutralization ─────────
+    eval_text, injection_detected, injection_matches = hardening.sanitize_prompt_injections(text)
+
+    # ── Model inference watchdog with graceful degradation fallback ─────────
+    degraded_fallback = False
+    model_status = "ok"
     try:
-        model_score = detector.model_signal(text)
+        model_score, model_status, model_latency_ms = hardening.safe_model_eval(eval_text)
     except ValueError as exc:
         audit.log_rejection(creator_id=creator_id, reason="detector_error", error=str(exc))
         return jsonify({
@@ -216,10 +222,20 @@ def submit():
 
     style_score = stylometry.style_signal(text)
     rep_score = stylometry.repetition_signal(text)
-    combined_score = scoring.combine_signals(model_score, style_score, rep_score)
+
+    if model_score is None:
+        # Circuit-breaker fallback: gracefully score using stylometric heuristic
+        degraded_fallback = True
+        combined_score = style_score
+        guess, label = scoring.score_to_label(combined_score)
+        label = f"{label} [Heuristic Degradation Fallback]"
+        status = "degraded"
+    else:
+        combined_score = scoring.combine_signals(model_score, style_score, rep_score)
+        guess, label = scoring.score_to_label(combined_score)
+        status = "decided"
 
     content_id = str(uuid.uuid4())
-    guess, label = scoring.score_to_label(combined_score)
     confidence = scoring.calculate_confidence(combined_score, guess)
 
     is_verified = creator_id in _verified_creators
@@ -235,8 +251,10 @@ def submit():
         style_score=style_score,
         combined_score=combined_score,
         label=label,
-        status="decided",
+        status=status,
         verified_creator=is_verified,
+        prompt_injection_detected=injection_detected,
+        degraded_fallback=degraded_fallback,
     )
 
     return jsonify({
@@ -248,8 +266,10 @@ def submit():
         "model_score": model_score,
         "style_score": style_score,
         "combined_score": combined_score,
-        "status": "decided",
+        "status": status,
         "verified_creator": is_verified,
+        "prompt_injection_detected": injection_detected,
+        "degraded_fallback": degraded_fallback,
     }), 200
 
 

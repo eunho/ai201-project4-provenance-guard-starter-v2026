@@ -86,15 +86,20 @@ def safe_model_eval(text: str, timeout_seconds: float = 3.0) -> Tuple[Optional[f
 
     Returns:
     - score: float model score or None if fallen back
-    - status: "ok" or "fallback"
+    - status: "ok" or "fallback:<reason>"
     - elapsed_ms: execution time in milliseconds
+
+    Note: ValueError (e.g. text too short) is passed through so HTTP 400 is preserved.
     """
     t0 = time.perf_counter()
     try:
         score = detector.model_signal(text)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         return score, "ok", round(elapsed_ms, 2)
-    except (RuntimeError, ValueError, Exception) as exc:
+    except ValueError:
+        # Pass through input-validation ValueError for HTTP 400
+        raise
+    except (RuntimeError, TimeoutError, Exception) as exc:
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         # Graceful fallback: return None score and fallback status
         return None, f"fallback:{type(exc).__name__}", round(elapsed_ms, 2)
