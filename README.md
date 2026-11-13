@@ -1016,6 +1016,8 @@ Every submission and rejection writes an immutable structured JSON record to `lo
   2. Executed 10 sequential evaluation trials with realistic human-authored prose samples (~170–210 characters each) through the complete Flask evaluation pipeline.
   3. Measured process user and system CPU runtime using Python's `time.process_time()` and `resource.getrusage(resource.RUSAGE_SELF)`, while capturing microsecond wall-clock latency with `time.perf_counter()`.
   4. Calculated the arithmetic mean across all 10 trials (`benchmark_cost.py`), verifying low variance ($\sigma = 2.24\text{ ms}$).
+- **Cost to Run for 100 People a Day**:
+  Running this service for 100 people a day (assuming 1 submission each) requires exactly $100 \times 0.0308\text{ CPU-seconds} = 3.08\text{ CPU-seconds of compute per day}$, which at $0.085/\text{hour} (\$0.00002361/\text{CPU-second})$ on an AWS `c6i.large` instance costs $3.08 \times \$0.00002361 = \mathbf{\$0.0000727\text{ per day}}$ (or $\$0.0265\text{ per year}$ in variable compute spend; on a dedicated baseline \$5.00/month 1-vCPU server, serving 100 submissions utilizes just $0.00356\%$ of the day's available CPU capacity).
 
 **Run Log and Verdicts — Before**
 
@@ -1183,6 +1185,38 @@ The single miss (Criterion 2) traces directly to a disconnect between the detect
   "verified_creator": false
 }
 ```
+
+**What's Still Broken**
+
+- **Targets Set Too Low**:
+  Because all five acceptance criteria were MET after the adversarial floor improvement, the test suite revealed two criteria whose targets were set too leniently:
+  1. *Criterion 5 (End-to-End Latency < 100ms)*: The target of 100 ms was too generous; warm-cache requests completed in an average of $21.82\text{ ms}$ with a maximum of $30.97\text{ ms}$, providing an unnecessary $>3\times$ safety margin. I would tighten this target from $< 100\text{ ms}$ to **$< 45\text{ ms}$** on warm model cache.
+  2. *Criterion 1 (Non-Linguistic Input Rejection)*: The target required rejecting non-linguistic inputs and succeeded on 10/10, but the underlying regex `[A-Za-z]{2,}` is strictly ASCII English. While non-English scripts were outside our declared scope boundary, this means legitimate non-English writing (e.g., Arabic `MF07` or Japanese prose) is currently rejected as non-linguistic noise. I would tighten Criterion 1 by testing Unicode letter properties (`\p{L}`) rather than ASCII `[A-Za-z]`.
+- **Next Production Priority (If I Had Another Unit)**:
+  If I had another unit to continue hardening this system for production, I would implement sliding-window token entropy scoring across overlapping 100-token chunks rather than relying on global sequence perplexity. This would eliminate context-bolting evasion attacks (`EV03`, `EV04`, `EV09`) where adversaries dilute AI paragraphs inside genuine human text, catching hidden synthetic fragments that currently escape global sequence averaging.
+
+**How I Used AI**
+
+- **Prompting for Criteria Defensibility (Milestone 4)**:
+  I prompted Gemini to stress-test my drafted criteria before running tests:
+  *"Here are five acceptance criteria for an operational failure-hardening extension. For each one: how would an independent reviewer verify it from the sentence alone without asking me, what edge case would cause it to fail, and is any target set too easy?"*
+  The model highlighted that Criterion 3 initially said "handles model errors cleanly", which was a subjective opinion. I refined it into checkable criteria: "100% of simulated timeouts return HTTP 200 with status 'degraded' and degraded_fallback: true".
+- **Prompting for Mechanism Diagnosis (Milestone 6)**:
+  After Criterion 2 missed with 3/10 despite detecting all injections, I prompted:
+  *"In a multi-signal detector where prompt injection is detected and stripped, what mathematical mechanism causes composite scoring to still output 'human'?"*
+  The model confirmed that stripping headers without an adversarial penalty left the underlying benchmark text subject to passive stylometric dilution ($style\_score \approx 0.40$), which mathematically pulled composite scores into the human band ($< 0.40$).
+- **Where AI Was Used vs. Human Judgment**:
+  AI was used for rapid hypothesis generation and syntax verification. Human engineering judgment was strictly required for defining the operational trade-offs: deciding whether an adversarial attempt should result in a hard 400 rejection versus routing to `unsure` with human appeal recourse, ensuring false positives on authentic human writers remained at zero.
+
+**Declared Stretch Features (Completed)**
+
+1. **Latency Breakdown**:
+   Microsecond-level telemetry was instrumented across all pipeline stages (`input_validation`, `adversarial_prefilter`, `model_inference`, `stylometry_scoring`, `decision_fusion`, `audit_commit`) and logged in both `logs/audit.jsonl` and API responses. Under warm steady state, model inference accounts for $98.8\%\text{--}99.6\%$ of execution time ($19\text{--}28\text{ ms}$), with input hygiene validation taking $<0.05\text{ ms}$, prompt-injection pre-filtering taking $<0.07\text{ ms}$, and decision fusion taking $<0.03\text{ ms}$.
+2. **10x Load Observation**:
+   Executed a high-throughput stress test of 50 rapid requests in $2.31\text{ seconds}$ ($21.6\text{ req/sec}$ throughput). The rate limiting layer actively engaged, successfully processing the first 10 requests with HTTP 200 ($25\text{ ms}$ average latency) and cleanly shedding the remaining 40 burst requests with HTTP 429 ($0.14\text{ ms}$ rejection latency), proving that rate-limiting prevents local CPU model saturation.
+3. **Second Measured Improvement (Inference Watchdog Circuit-Breaker)**:
+   Implemented a resilient watchdog boundary in `hardening.py::safe_model_eval`. When local transformer inference times out or throws an unhandled exception, the circuit-breaker safely intercepts the fault and degrades to heuristic stylometry scoring with status `degraded` and HTTP 200, achieving 10/10 graceful fallbacks with zero unhandled 500 crashes.
+
 
 
 
