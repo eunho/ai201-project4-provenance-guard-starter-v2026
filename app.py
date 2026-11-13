@@ -257,7 +257,12 @@ def submit():
         status = "degraded"
     else:
         combined_score = scoring.combine_signals(model_score, style_score, rep_score)
+        # Capstone Improvement: Adversarial injection floor to prevent evasion into human band
+        if injection_detected:
+            combined_score = max(combined_score, 0.50)
         guess, label = scoring.score_to_label(combined_score)
+        if injection_detected:
+            label = f"{label} [Adversarial Directive Neutralized]"
         status = "decided"
 
     content_id = str(uuid.uuid4())

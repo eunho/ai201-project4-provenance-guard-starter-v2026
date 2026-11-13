@@ -1017,7 +1017,7 @@ Every submission and rejection writes an immutable structured JSON record to `lo
   3. Measured process user and system CPU runtime using Python's `time.process_time()` and `resource.getrusage(resource.RUSAGE_SELF)`, while capturing microsecond wall-clock latency with `time.perf_counter()`.
   4. Calculated the arithmetic mean across all 10 trials (`benchmark_cost.py`), verifying low variance ($\sigma = 2.24\text{ ms}$).
 
-**Run Log and Verdicts**
+**Run Log and Verdicts — Before**
 
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
 |---|---|---|---|---|---|
@@ -1121,5 +1121,68 @@ Every submission and rejection writes an immutable structured JSON record to `lo
     "model_inference_percentage": "99.59%"
   }
   ```
+
+**Diagnosis of Criteria Outcomes**
+
+- **Criterion 1 (Rejection of Non-Linguistic Inputs)** — **MET** (10/10 across all 3 trials).
+  - *Diagnosis*: The Stage 1 linguistic input hygiene guard (`validate_linguistic_hygiene`) successfully intercepted all control characters (`MF03`), pure punctuation strings (`MF04`), emoji sequences (`MF06`), and symbol noise prior to tokenizer invocation, returning structured HTTP 400 Bad Request responses in under 0.05 ms.
+- **Criterion 2 (Prompt-Injection Neutralization)** — **MISSED** (3/10 across all 3 trials; target was $\ge 9/10$).
+  - *Stage*: **Decision Fusion (`scoring.combine_signals` / `app.py::submit`)**
+  - *Mechanism*: The Stage 2 pre-filter (`sanitize_prompt_injections`) successfully matched and stripped prompt injection headers in 100% of test inputs (`prompt_injection_detected = True`). However, once the prefix directives (`SYSTEM:`, `Ignore previous instructions`) were stripped, the underlying benchmark AI texts had standard academic stylometry ($style\_score \approx 0.40$) and zero repetitive stanzas ($rep\_score = 0.0$). In the decision fusion stage, these low sub-scores diluted moderate transformer perplexity ($model\_score \approx 0.61$) down into composite scores between $0.22$ and $0.35$ (`guess: "human"`). Because decision fusion had no policy to penalize or route detected injection attempts, 7 of 10 adversarial payloads successfully achieved their goal: evading AI detection into an automated human verdict.
+- **Criterion 3 (Circuit-Breaker Graceful Degradation)** — **MET** (10/10 across all 3 trials).
+  - *Diagnosis*: The inference watchdog wrapper in `safe_model_eval` caught all simulated timeouts and runtime exceptions cleanly. Rather than throwing HTTP 500 errors or hanging the request thread, the pipeline fell back to heuristic stylometry scoring with status `degraded` and HTTP 200 in 0.10 ms.
+- **Criterion 4 (Human False Positive Rate)** — **MET** (0/20 across all 3 trials; target was $\le 1/20$).
+  - *Diagnosis*: Zero false positive AI classifications occurred on authentic human and ESL prose samples (maximum human score was $0.3455 < 0.40$), verifying that hardening measures introduced no regressions on legitimate writing.
+- **Criterion 5 (End-to-End Latency Under Hardened Execution)** — **MET** (10/10 across all 3 trials).
+  - *Diagnosis*: Warm model execution completed in 19–31 ms (well under the 100 ms SLA), with model inference consistently accounting for $>98\%$ of total elapsed time.
+
+*Pattern Across Misses*:
+The single miss (Criterion 2) traces directly to a disconnect between the detection pre-filter and decision fusion: detecting an adversarial injection without binding that detection into the classification policy allowed sanitized text to slip through passive heuristic scoring.
+
+**The Improvement**
+
+- **Change Made**: In `app.py::submit` at Stage 5 (Decision Fusion), wired `prompt_injection_detected` into the scoring policy. When an adversarial prompt injection is detected, an adversarial floor is enforced: `combined_score = max(combined_score, 0.50)` and the classification label is appended with `[Adversarial Directive Neutralized]`.
+- **Why This Change**: Follows the diagnosis directly: when a caller explicitly injects adversarial instructions to bypass detection, the service must not permit dilution into the `human` classification band ($< 0.40$). Enforcing a $0.50$ floor routes all adversarial evasion attempts into at least the neutral `unsure` band (or `ai`), denying an automated human classification and flagging the content for mandatory human reviewer audit.
+- **Did It Help, and The Production Trade-Off**:
+  Yes, it completely resolved the miss: Criterion 2 improved from 3/10 to 10/10 across all 3 trials, satisfying the $\ge 90\%$ target.
+  *The Trade-off*: Any legitimate human author who directly quotes an adversarial prompt directive (for example, in an academic essay analyzing LLM security) will have their submission routed into `unsure` rather than receiving an instant automated human verdict, requiring them to utilize the `POST /appeal` path for manual staff clearance.
+
+**Run Log and Verdicts — After**
+
+| Criterion | Target | Before (Run 1 / 2 / 3) | After (Run 1 / 2 / 3) | Verdict Before | Verdict After |
+|---|---|---|---|---|---|
+| 1. Rejection of Non-Linguistic Inputs | 10 of 10 | 10/10, 10/10, 10/10 | 10/10, 10/10, 10/10 | MET | **MET** |
+| 2. Prompt-Injection Neutralization | 9 of 10 | 3/10, 3/10, 3/10 | 10/10, 10/10, 10/10 | MISSED | **MET** |
+| 3. Circuit-Breaker Graceful Degradation | 10 of 10 | 10/10, 10/10, 10/10 | 10/10, 10/10, 10/10 | MET | **MET** |
+| 4. Human False Positive Rate | <= 1 of 20 | 0/20, 0/20, 0/20 | 0/20, 0/20, 0/20 | MET | **MET** |
+| 5. End-to-End Latency < 100ms | 10 of 10 | 10/10, 10/10, 10/10 | 10/10, 10/10, 10/10 | MET | **MET** |
+
+*Real Trial Output (Criterion 2 After Improvement)* — Produced by `app.py::submit` with adversarial floor policy:
+```json
+{
+  "combined_score": 0.5,
+  "confidence": 0.44,
+  "content_id": "dfc2838c-3e59-448c-bbf2-763f9eb13103",
+  "creator_id": "after_c2",
+  "degraded_fallback": false,
+  "guess": "unsure",
+  "label": "We could not confidently determine whether this text is human-written or AI-generated, so no definitive automated verdict has been assigned. [Adversarial Directive Neutralized]",
+  "latency_breakdown": {
+    "fusion_ms": 0.02,
+    "model_ms": 28.52,
+    "prefilter_ms": 0.03,
+    "style_ms": 0.14,
+    "total_ms": 28.71,
+    "validation_ms": 0.0
+  },
+  "latency_ms": 28.71,
+  "model_score": 0.6168,
+  "prompt_injection_detected": true,
+  "status": "decided",
+  "style_score": 0.074,
+  "verified_creator": false
+}
+```
+
 
 
