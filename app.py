@@ -163,12 +163,15 @@ def submit():
     """
     Take a piece of text, decide about it, log the decision, answer.
     """
+    t_req_start = time.perf_counter()
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
-        audit.log_rejection(creator_id="unknown", reason="malformed_json")
+        total_latency_ms = round((time.perf_counter() - t_req_start) * 1000.0, 2)
+        audit.log_rejection(creator_id="unknown", reason="malformed_json", latency_ms=total_latency_ms)
         return jsonify({
             "error": "bad_request",
             "message": "Request body must be a JSON object.",
+            "latency_ms": total_latency_ms,
         }), 400
 
     text = payload.get("text")
@@ -176,53 +179,75 @@ def submit():
 
     if not isinstance(text, str) or not text.strip():
         cid = creator_id if isinstance(creator_id, str) and creator_id.strip() else "unknown"
-        audit.log_rejection(creator_id=cid, reason="missing_or_empty_text")
+        total_latency_ms = round((time.perf_counter() - t_req_start) * 1000.0, 2)
+        audit.log_rejection(creator_id=cid, reason="missing_or_empty_text", latency_ms=total_latency_ms)
         return jsonify({
             "error": "bad_request",
             "message": "'text' field is required and must be a non-empty string.",
+            "latency_ms": total_latency_ms,
         }), 400
 
     if not isinstance(creator_id, str) or not creator_id.strip():
-        audit.log_rejection(creator_id="unknown", reason="missing_or_empty_creator_id")
+        total_latency_ms = round((time.perf_counter() - t_req_start) * 1000.0, 2)
+        audit.log_rejection(creator_id="unknown", reason="missing_or_empty_creator_id", latency_ms=total_latency_ms)
         return jsonify({
             "error": "bad_request",
             "message": "'creator_id' field is required and must be a non-empty string.",
+            "latency_ms": total_latency_ms,
         }), 400
 
     if len(text) > 50000:
-        audit.log_rejection(creator_id=creator_id, reason="text_too_long", length=len(text))
+        total_latency_ms = round((time.perf_counter() - t_req_start) * 1000.0, 2)
+        audit.log_rejection(creator_id=creator_id, reason="text_too_long", length=len(text), latency_ms=total_latency_ms)
         return jsonify({
             "error": "bad_request",
             "message": f"'text' exceeds maximum length of 50,000 characters ({len(text)} chars).",
+            "latency_ms": total_latency_ms,
         }), 400
 
-    # ── Linguistic input hygiene (Shape B hardening) ────────────────────────
+    # ── Stage 1: Linguistic input hygiene (Shape B hardening) ────────────────
+    t_val_start = time.perf_counter()
     is_valid_hygiene, hygiene_err = hardening.validate_linguistic_hygiene(text)
+    t_val_ms = (time.perf_counter() - t_val_start) * 1000.0
+
     if not is_valid_hygiene:
-        audit.log_rejection(creator_id=creator_id, reason="non_linguistic_input", error=hygiene_err)
+        total_latency_ms = round((time.perf_counter() - t_req_start) * 1000.0, 2)
+        audit.log_rejection(creator_id=creator_id, reason="non_linguistic_input", error=hygiene_err, latency_ms=total_latency_ms)
         return jsonify({
             "error": "bad_request",
             "message": hygiene_err,
+            "latency_ms": total_latency_ms,
         }), 400
 
-    # ── Adversarial prompt-injection pre-filtering & neutralization ─────────
+    # ── Stage 2: Adversarial prompt-injection pre-filtering & neutralization ─
+    t_prefilter_start = time.perf_counter()
     eval_text, injection_detected, injection_matches = hardening.sanitize_prompt_injections(text)
+    t_prefilter_ms = (time.perf_counter() - t_prefilter_start) * 1000.0
 
-    # ── Model inference watchdog with graceful degradation fallback ─────────
+    # ── Stage 3: Model inference watchdog with graceful degradation fallback ─
+    t_model_start = time.perf_counter()
     degraded_fallback = False
     model_status = "ok"
     try:
-        model_score, model_status, model_latency_ms = hardening.safe_model_eval(eval_text)
+        model_score, model_status, _ = hardening.safe_model_eval(eval_text)
     except ValueError as exc:
-        audit.log_rejection(creator_id=creator_id, reason="detector_error", error=str(exc))
+        total_latency_ms = round((time.perf_counter() - t_req_start) * 1000.0, 2)
+        audit.log_rejection(creator_id=creator_id, reason="detector_error", error=str(exc), latency_ms=total_latency_ms)
         return jsonify({
             "error": "bad_request",
             "message": str(exc),
+            "latency_ms": total_latency_ms,
         }), 400
+    t_model_ms = (time.perf_counter() - t_model_start) * 1000.0
 
+    # ── Stage 4: Stylometry and repetition scoring ───────────────────────────
+    t_style_start = time.perf_counter()
     style_score = stylometry.style_signal(text)
     rep_score = stylometry.repetition_signal(text)
+    t_style_ms = (time.perf_counter() - t_style_start) * 1000.0
 
+    # ── Stage 5: Decision fusion ─────────────────────────────────────────────
+    t_fusion_start = time.perf_counter()
     if model_score is None:
         # Circuit-breaker fallback: gracefully score using stylometric heuristic
         degraded_fallback = True
@@ -241,7 +266,19 @@ def submit():
     is_verified = creator_id in _verified_creators
     if is_verified:
         label = f"{label} [Verified Human Author]"
+    t_fusion_ms = (time.perf_counter() - t_fusion_start) * 1000.0
 
+    total_latency_ms = round((time.perf_counter() - t_req_start) * 1000.0, 2)
+    timing_breakdown = {
+        "validation_ms": round(t_val_ms, 2),
+        "prefilter_ms": round(t_prefilter_ms, 2),
+        "model_ms": round(t_model_ms, 2),
+        "style_ms": round(t_style_ms, 2),
+        "fusion_ms": round(t_fusion_ms, 2),
+        "total_ms": total_latency_ms,
+    }
+
+    input_preview = text[:80] + "..." if len(text) > 80 else text
     audit.log_decision(
         content_id=content_id,
         creator_id=creator_id,
@@ -255,6 +292,10 @@ def submit():
         verified_creator=is_verified,
         prompt_injection_detected=injection_detected,
         degraded_fallback=degraded_fallback,
+        input_length=len(text),
+        input_preview=input_preview,
+        latency_ms=total_latency_ms,
+        latency_breakdown=timing_breakdown,
     )
 
     return jsonify({
@@ -270,6 +311,8 @@ def submit():
         "verified_creator": is_verified,
         "prompt_injection_detected": injection_detected,
         "degraded_fallback": degraded_fallback,
+        "latency_ms": total_latency_ms,
+        "latency_breakdown": timing_breakdown,
     }), 200
 
 
