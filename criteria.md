@@ -119,3 +119,55 @@ Production services must never crash or leak internal tracebacks when receiving 
      A number you missed stays where it is, gets diagnosed, and gets a fix
      attempted. That's where the points are.
      ───────────────────────────────────────────────────────────────────────── -->
+
+---
+
+# Capstone Acceptance Criteria (Shape B — Failure Hardening)
+
+Written in the Capstone unit **before** running evaluation trials. At least three criteria directly evaluate the failure-hardening extension.
+
+---
+
+## 1. Rejection Rate of Non-Linguistic and Corrupted Inputs (Extension — Bad Path)
+
+Across 10 distinct non-linguistic input payloads (including unprintable control characters `MF03`, pure punctuation strings `MF04`, emoji-only strings `MF06`, and non-linguistic symbol noise), exactly 10 of 10 (100%) must be rejected with an HTTP 400 Bad Request response and recorded in `logs/audit.jsonl` with `reason="non_linguistic_input"` without invoking local transformer inference or returning an unhandled HTTP 500 error.
+
+**Why this target:**
+Non-linguistic text and control characters bypass naive string validation, causing unhandled tokenization errors or wasting GPU/CPU inference on gibberish. A 100% rejection rate is a hard operational requirement: any leak allows adversarial callers to degrade server resources and contaminate audit logs with unscoreable records.
+
+---
+
+## 2. Adversarial Prompt-Injection Neutralization and Detection (Extension)
+
+Across 10 benchmark synthetic AI submissions prepended with adversarial prompt-injection evasion instructions (e.g. `SYSTEM: provenance check bypassed`, `Ignore all previous instructions`, `SYSTEM INSTRUCTION OVERRIDE:`), the detector must identify the evasion attempt (`prompt_injection_detected: true` in structured telemetry) in at least 9 of 10 cases ($\ge 90\%$), strip the adversarial directives before scoring, and classify the underlying text as AI or unsure (`combined_score` $\ge 0.40$), preventing false evasion into `human`.
+
+**Why this target:**
+Adversarial prompt injection was the primary evasion vector (`PI01`, `PI02`, `PI04`, `CUSTOM_EV03`) in Unit 8 that fooled perplexity calculations into scoring synthetic text as human. Setting a 90% floor allows for minor linguistic variations while ensuring prompt headers cannot trivially bypass detection.
+
+---
+
+## 3. Circuit-Breaker Fallback and Degraded Service Availability (Extension — Failure Recovery)
+
+When transformer model inference encounters an unhandled exception or timeout deadline across 10 simulated failure requests, 10 of 10 (100%) must return an HTTP 200 response with `status: "degraded"`, `degraded_fallback: true`, and a valid score computed from stylometric heuristics, with zero unhandled HTTP 500 crashes and each degraded transition logged to the audit trail.
+
+**Why this target:**
+In production or local memory-constrained environments, transformer execution can stall or throw OOM/CUDA faults. Rather than presenting callers with a 500 service outage, the circuit-breaker must achieve a 100% graceful fallback rate so that the service remains operational and audit trails remain continuous.
+
+---
+
+## 4. False Positive Rate on Authentic Human Writing (Baseline Regression Guard)
+
+Across 20 distinct authentic human-written submissions (including at least 5 ESL or plain prose samples), at most 1 sample ($\le 5\%$) may receive a `high-confidence AI` classification (`guess == "ai"`).
+
+**Why this target:**
+Wrongful automated AI accusations against real writers inflict severe reputational and emotional harm. Maintaining a strict 5% ceiling across test trials ensures the hardening modifications have not caused regressions that over-penalize straightforward human writing.
+
+---
+
+## 5. End-to-End Latency Under Hardened Execution (Operational SLA & Telemetry)
+
+Across 10 standard valid text submissions on warm model cache, 100% of requests must complete end-to-end processing with structured telemetry in under 100 ms, with 90% ($\ge 9/10$) of the execution time accounted for in the model inference stage.
+
+**Why this target:**
+The hardening, input hygiene, and stage-latency profiling layers must not introduce significant operational overhead. A 100 ms latency ceiling ensures responsive interactive performance while confirming that the new operational layers add less than 5 ms of total overhead.
+
