@@ -1017,3 +1017,109 @@ Every submission and rejection writes an immutable structured JSON record to `lo
   3. Measured process user and system CPU runtime using Python's `time.process_time()` and `resource.getrusage(resource.RUSAGE_SELF)`, while capturing microsecond wall-clock latency with `time.perf_counter()`.
   4. Calculated the arithmetic mean across all 10 trials (`benchmark_cost.py`), verifying low variance ($\sigma = 2.24\text{ ms}$).
 
+**Run Log and Verdicts**
+
+| Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
+|---|---|---|---|---|---|
+| 1. Rejection of Non-Linguistic Inputs | 10 of 10 | 10/10 | 10/10 | 10/10 | MET |
+| 2. Prompt-Injection Neutralization | 9 of 10 | 3/10 | 3/10 | 3/10 | MISSED |
+| 3. Circuit-Breaker Graceful Degradation | 10 of 10 | 10/10 | 10/10 | 10/10 | MET |
+| 4. Human False Positive Rate | <= 1 of 20 | 0/20 | 0/20 | 0/20 | MET |
+| 5. End-to-End Latency < 100ms | 10 of 10 | 10/10 | 10/10 | 10/10 | MET |
+
+*Real Trial Output (Run 1 Extract per Criterion)*:
+
+- **Criterion 1 (Rejection of Non-Linguistic Inputs)** — Produced by `app.py::submit` via `hardening.py::validate_linguistic_hygiene`:
+  ```json
+  {
+    "error": "bad_request",
+    "latency_ms": 0.01,
+    "message": "Text contains forbidden unprintable control character at index 0."
+  }
+  ```
+
+- **Criterion 2 (Prompt-Injection Neutralization)** — Produced by `app.py::submit` via `hardening.py::sanitize_prompt_injections`:
+  ```json
+  {
+    "combined_score": 0.3485,
+    "confidence": 0.7,
+    "content_id": "26fc0abd-d32e-423a-8043-f28a9f9b0724",
+    "creator_id": "c2_t1",
+    "degraded_fallback": false,
+    "guess": "human",
+    "label": "This writing displays the natural sentence rhythms, vocabulary variation, and expressive structure characteristic of an authentic human writer.",
+    "latency_breakdown": {
+      "fusion_ms": 0.03,
+      "model_ms": 30.76,
+      "prefilter_ms": 0.07,
+      "style_ms": 0.12,
+      "total_ms": 30.97,
+      "validation_ms": 0.0
+    },
+    "latency_ms": 30.97,
+    "model_score": 0.6168,
+    "prompt_injection_detected": true,
+    "status": "decided",
+    "style_score": 0.074,
+    "verified_creator": false
+  }
+  ```
+
+- **Criterion 3 (Circuit-Breaker Graceful Degradation)** — Produced by `app.py::submit` via `hardening.py::safe_model_eval`:
+  ```json
+  {
+    "combined_score": 0.3744,
+    "confidence": 0.62,
+    "content_id": "aa1c38b8-0f6b-418f-a0c5-91e5c3c2b885",
+    "creator_id": "c3_t1",
+    "degraded_fallback": true,
+    "guess": "unsure",
+    "label": "We could not confidently determine whether this text is human-written or AI-generated, so no definitive automated verdict has been assigned. [Heuristic Degradation Fallback]",
+    "latency_breakdown": {
+      "fusion_ms": 0.01,
+      "model_ms": 0.0,
+      "prefilter_ms": 0.01,
+      "style_ms": 0.07,
+      "total_ms": 0.1,
+      "validation_ms": 0.0
+    },
+    "latency_ms": 0.1,
+    "model_score": null,
+    "prompt_injection_detected": false,
+    "status": "degraded",
+    "style_score": 0.3744,
+    "verified_creator": false
+  }
+  ```
+
+- **Criterion 4 (Human False Positive Rate)** — Produced by `app.py::submit` via `scoring.py::combine_signals`:
+  ```json
+  {
+    "combined_score": 0.3455,
+    "confidence": 0.7,
+    "content_id": "8f8ef192-35db-44b2-9a00-1c35b54a7f0e",
+    "creator_id": "c4_t1",
+    "degraded_fallback": false,
+    "guess": "human",
+    "label": "This writing displays the natural sentence rhythms, vocabulary variation, and expressive structure characteristic of an authentic human writer.",
+    "status": "decided"
+  }
+  ```
+
+- **Criterion 5 (End-to-End Latency < 100ms)** — Produced by `app.py::submit` via microsecond timing telemetry:
+  ```json
+  {
+    "latency_ms": 27.07,
+    "latency_breakdown": {
+      "validation_ms": 0.0,
+      "prefilter_ms": 0.01,
+      "model_ms": 26.96,
+      "style_ms": 0.08,
+      "fusion_ms": 0.02,
+      "total_ms": 27.07
+    },
+    "model_inference_percentage": "99.59%"
+  }
+  ```
+
+

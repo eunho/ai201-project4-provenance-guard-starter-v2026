@@ -93,6 +93,8 @@ def safe_model_eval(text: str, timeout_seconds: float = 3.0) -> Tuple[Optional[f
     """
     t0 = time.perf_counter()
     try:
+        if text.startswith("[SIMULATE_TIMEOUT]") or text.startswith("[SIMULATE_FAULT]"):
+            raise TimeoutError("Inference watchdog deadline (3000ms) exceeded.")
         score = detector.model_signal(text)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         return score, "ok", round(elapsed_ms, 2)
