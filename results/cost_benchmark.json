@@ -1,0 +1,119 @@
+{
+  "trials": [
+    {
+      "trial": 1,
+      "status": 200,
+      "char_len": 197,
+      "wall_sec": 0.0258,
+      "cpu_sec": 0.0358,
+      "latency_ms": 25.0,
+      "model_ms": 24.86,
+      "guess": "human",
+      "combined_score": 0.2373
+    },
+    {
+      "trial": 2,
+      "status": 200,
+      "char_len": 207,
+      "wall_sec": 0.021,
+      "cpu_sec": 0.0284,
+      "latency_ms": 20.27,
+      "model_ms": 20.19,
+      "guess": "human",
+      "combined_score": 0.2086
+    },
+    {
+      "trial": 3,
+      "status": 200,
+      "char_len": 210,
+      "wall_sec": 0.0261,
+      "cpu_sec": 0.0385,
+      "latency_ms": 25.47,
+      "model_ms": 25.36,
+      "guess": "unsure",
+      "combined_score": 0.4389
+    },
+    {
+      "trial": 4,
+      "status": 200,
+      "char_len": 197,
+      "wall_sec": 0.0205,
+      "cpu_sec": 0.0277,
+      "latency_ms": 19.86,
+      "model_ms": 19.79,
+      "guess": "human",
+      "combined_score": 0.185
+    },
+    {
+      "trial": 5,
+      "status": 200,
+      "char_len": 204,
+      "wall_sec": 0.0232,
+      "cpu_sec": 0.0312,
+      "latency_ms": 22.65,
+      "model_ms": 22.55,
+      "guess": "human",
+      "combined_score": 0.273
+    },
+    {
+      "trial": 6,
+      "status": 200,
+      "char_len": 187,
+      "wall_sec": 0.0236,
+      "cpu_sec": 0.0319,
+      "latency_ms": 22.99,
+      "model_ms": 22.92,
+      "guess": "human",
+      "combined_score": 0.2313
+    },
+    {
+      "trial": 7,
+      "status": 200,
+      "char_len": 170,
+      "wall_sec": 0.0208,
+      "cpu_sec": 0.028,
+      "latency_ms": 20.17,
+      "model_ms": 20.11,
+      "guess": "human",
+      "combined_score": 0.2319
+    },
+    {
+      "trial": 8,
+      "status": 200,
+      "char_len": 194,
+      "wall_sec": 0.0202,
+      "cpu_sec": 0.0274,
+      "latency_ms": 19.62,
+      "model_ms": 19.56,
+      "guess": "human",
+      "combined_score": 0.2763
+    },
+    {
+      "trial": 9,
+      "status": 200,
+      "char_len": 193,
+      "wall_sec": 0.0201,
+      "cpu_sec": 0.0272,
+      "latency_ms": 19.51,
+      "model_ms": 19.44,
+      "guess": "human",
+      "combined_score": 0.1714
+    },
+    {
+      "trial": 10,
+      "status": 200,
+      "char_len": 174,
+      "wall_sec": 0.0233,
+      "cpu_sec": 0.0319,
+      "latency_ms": 22.65,
+      "model_ms": 22.57,
+      "guess": "unsure",
+      "combined_score": 0.355
+    }
+  ],
+  "mean_wall_sec": 0.02246,
+  "mean_cpu_sec": 0.0308,
+  "mean_latency_ms": 21.819,
+  "std_latency_ms": 2.2441105637250183,
+  "cloud_compute_cost_usd": 7.272222222222223e-07
+}

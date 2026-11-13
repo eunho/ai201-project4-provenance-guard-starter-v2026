@@ -1,14 +1,74 @@
 # Running Provenance Guard
 
-Everything about how the starter works.
+---
 
-This is a **web service**. It runs on your machine and you talk to it with
-`curl` from another terminal. If you've not built a backend before, that's
-assumed — the starter ships one that already answers.
+## Capstone Run Path — Path B (Local with Logs)
+
+This system runs locally on your machine via a single documented command sequence, providing reproducible execution, failure hardening, and structured observability logging without hosted third-party API dependencies.
+
+### 1. Environment Requirements
+
+- **Python Version**: Python 3.11, 3.12, or 3.13 (verified on macOS Darwin & Linux x86_64/arm64). Python 3.14+ is unsupported by upstream PyTorch wheels.
+- **Pinned Dependencies** (`requirements.txt`):
+  - `torch==2.15.0` (PyTorch CPU backend)
+  - `transformers==4.40.0` (Hugging Face model runtime)
+  - `flask==3.0.0` (WSGI web microframework)
+  - `flask-limiter==3.8.0` (Rate limiting engine)
+  - `certifi==2024.7.4` (CA bundle)
+  - `requests==2.32.3`, `python-dotenv==1.0.1`
+- **Model Weights & Storage Footprint**:
+  - Model: Hugging Face `gpt2` (124M parameters)
+  - Disk footprint: ~548 MB cached in `~/.cache/huggingface/hub/models--gpt2`
+  - Active RAM footprint: ~490–520 MB resident during inference.
+
+### 2. Single Documented Command (From a Clean Checkout)
+
+To initialize the environment and start the service from a fresh checkout:
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && python app.py
+```
+
+Or when the virtual environment is already initialized:
+
+```bash
+source .venv/bin/activate && python app.py
+```
+
+### 3. Verification & Health Check
+
+In a separate terminal, test that the service is alive and healthy:
+
+```bash
+curl -s http://127.0.0.1:5000/health
+```
+
+Expected response:
+```json
+{"detector_loaded":true,"detector_model":"gpt2","log_entries":893,"ok":true,"rate_limiting":true}
+```
+
+### 4. Sending a Hardened Request & Viewing Telemetry
+
+Send a sample submission:
+
+```bash
+curl -X POST http://127.0.0.1:5000/submit \
+  -H "Content-Type: application/json" \
+  -d '{"creator_id": "author_demo", "text": "The morning sunlight filtered gently through the ancient pine branches, casting long fractured shadows across the damp woodland trail."}'
+```
+
+Every run appends a structured record with named fields (`timestamp`, `content_id`, `creator_id`, `guess`, `model_score`, `style_score`, `combined_score`, `label`, `status`, `latency_ms`, `latency_breakdown`) to `logs/audit.jsonl`.
+
+### 5. Committed Run Record (Real Session Extract)
+
+```json
+{"timestamp": "2026-11-13T20:18:45+00:00", "content_id": "c949ced2-e45c-4dc5-b97b-dd8c386890fc", "creator_id": "bench_author_1", "guess": "human", "model_score": 0.1876, "style_score": 0.4369, "combined_score": 0.2373, "label": "This writing displays the natural sentence rhythms, vocabulary variation, and expressive structure characteristic of an authentic human writer.", "status": "decided", "confidence": 0.8, "verified_creator": false, "prompt_injection_detected": false, "degraded_fallback": false, "input_length": 197, "input_preview": "The morning sunlight filtered gently through the ancient pine branches, casting ...", "latency_ms": 25.0, "latency_breakdown": {"validation_ms": 0.0, "prefilter_ms": 0.01, "model_ms": 24.86, "style_ms": 0.1, "fusion_ms": 0.02, "total_ms": 25.0}}
+```
 
 ---
 
-## Before your first class
+## Starter Guide (Units 7 & 8)
 
 ```bash
 python3 -m venv .venv
