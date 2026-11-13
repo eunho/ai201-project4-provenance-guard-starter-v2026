@@ -934,3 +934,27 @@ If this service ran in production, I would strictly prioritize preventing false 
 ---
 
 📖 **How to run this project: [RUNNING.md](RUNNING.md)**
+
+---
+
+## Capstone
+
+**System and Scope**
+
+- **Extended System**: Provenance Guard (AI201 Project 4 — Multi-signal AI text detector combining transformer perplexity, stylometry, repetition entropy, and deterministic audit trails).
+- **What's New**: End-to-end failure hardening (Shape B) against operational edge cases: strict linguistic input hygiene rejecting non-linguistic/control characters, adversarial prompt-injection pre-filtering to neutralize evasion attacks, inference watchdog timeout fallback with graceful degradation, and microsecond-level structured telemetry logging.
+- **Declared Shape**: **Shape B — Harden against failure**.
+- **What's Out of Scope**: Rewriting the Flask backend into an asynchronous ASGI framework, fine-tuning new base LLM checkpoints from scratch, and implementing multilingual/cross-language tokenization.
+
+**Declared Stretch Features (Planned Upfront)**
+
+1. **A Latency Breakdown**: Fine-grained per-stage telemetry (`input_validation`, `adversarial_prefilter`, `model_inference`, `stylometry_scoring`, `decision_fusion`, `audit_commit`) recorded in microsecond precision to quantify execution bottlenecks across normal, adversarial, and malformed traffic.
+2. **A Load Observation**: High-throughput stress run at 10x the standard rate (50 back-to-back requests) measuring response time variance, queue saturation, and rate-limit 429 enforcement under burst load.
+3. **A Second Measured Improvement**: Beyond initial input hygiene and prompt-injection sanitization (Improvement 1), a second measured hardening improvement (Improvement 2) deploying an inference watchdog circuit-breaker that catches slow or failing model evaluation and cleanly falls back to heuristic stylometry scoring with status `degraded`.
+
+**Run Path**
+
+- **Declared Path**: **Path B (Local with logs)**.
+- **Environment**: Python 3.11, PyTorch (CPU), Hugging Face Transformers (`gpt2`, ~500 MB RAM), Flask 3.x, Flask-Limiter.
+- Complete execution documentation and single-command startup steps are maintained in [RUNNING.md](RUNNING.md).
+
