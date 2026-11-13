@@ -939,12 +939,19 @@ If this service ran in production, I would strictly prioritize preventing false 
 
 ## Capstone
 
-**System and Scope**
+**The System**
 
-- **Extended System**: Provenance Guard (AI201 Project 4 — Multi-signal AI text detector combining transformer perplexity, stylometry, repetition entropy, and deterministic audit trails).
-- **What's New**: End-to-end failure hardening (Shape B) against operational edge cases: strict linguistic input hygiene rejecting non-linguistic/control characters, adversarial prompt-injection pre-filtering to neutralize evasion attacks, inference watchdog timeout fallback with graceful degradation, and microsecond-level structured telemetry logging.
-- **Declared Shape**: **Shape B — Harden against failure**.
-- **What's Out of Scope**: Rewriting the Flask backend into an asynchronous ASGI framework, fine-tuning new base LLM checkpoints from scratch, and implementing multilingual/cross-language tokenization.
+Provenance Guard (AI201 Project 4), an automated AI text detection and provenance audit microservice combining local transformer perplexity evaluation, stylometric statistics, repetition entropy scoring, and deterministic audit trails.
+
+**The Shape**
+
+Shape B — Harden against failure. I am hardening the evaluation pipeline against operational failure modes and adversarial edge cases: enforcing strict linguistic input hygiene to reject non-linguistic strings and control characters with structured HTTP 400 errors, applying regex-based adversarial prompt-injection pre-filtering to neutralize evasion markers (`SYSTEM:`, `IGNORE INSTRUCTIONS:`) before perplexity calculation, and adding an inference watchdog circuit-breaker that gracefully degrades to heuristic stylometry when transformer execution exceeds a 1.5-second deadline or encounters an inference fault.
+
+**What's Out of Scope**
+
+- I am not retraining or fine-tuning underlying transformer model weights or tokenizers.
+- I am not re-architecting the synchronous Flask server into an asynchronous ASGI/FastAPI framework.
+- I am not expanding the feature set to support multilingual non-English tokenization.
 
 **Declared Stretch Features (Planned Upfront)**
 
