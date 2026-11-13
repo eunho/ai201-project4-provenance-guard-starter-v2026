@@ -24,6 +24,7 @@ Routes:
     GET  /health      is the service up, and is the model loaded
 """
 
+import time
 import uuid
 
 from flask import Flask, jsonify, request
@@ -31,6 +32,7 @@ from flask import Flask, jsonify, request
 import audit
 import config
 import detector
+import hardening
 import scoring
 import stylometry
 
@@ -192,6 +194,15 @@ def submit():
         return jsonify({
             "error": "bad_request",
             "message": f"'text' exceeds maximum length of 50,000 characters ({len(text)} chars).",
+        }), 400
+
+    # ── Linguistic input hygiene (Shape B hardening) ────────────────────────
+    is_valid_hygiene, hygiene_err = hardening.validate_linguistic_hygiene(text)
+    if not is_valid_hygiene:
+        audit.log_rejection(creator_id=creator_id, reason="non_linguistic_input", error=hygiene_err)
+        return jsonify({
+            "error": "bad_request",
+            "message": hygiene_err,
         }), 400
 
     try:
