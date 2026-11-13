@@ -939,31 +939,29 @@ If this service ran in production, I would strictly prioritize preventing false 
 
 ## Capstone
 
-**The System**
+**What This Extends**
 
 Provenance Guard (AI201 Project 4), an automated AI text detection and provenance audit microservice combining local transformer perplexity evaluation, stylometric statistics, repetition entropy scoring, and deterministic audit trails.
+What's new in this extension is end-to-end failure hardening (Shape B) against operational edge cases: strict linguistic input hygiene rejecting non-linguistic/control characters without 500 crashes, adversarial prompt-injection pre-filtering and score routing to prevent evasion bypasses, an inference watchdog circuit-breaker providing graceful degradation to heuristic stylometry when model evaluation times out or fails, and fine-grained microsecond stage latency telemetry.
 
 **The Shape**
 
 Shape B — Harden against failure. I am hardening the evaluation pipeline against operational failure modes and adversarial edge cases: enforcing strict linguistic input hygiene to reject non-linguistic strings and control characters with structured HTTP 400 errors, applying regex-based adversarial prompt-injection pre-filtering to neutralize evasion markers (`SYSTEM:`, `IGNORE INSTRUCTIONS:`) before perplexity calculation, and adding an inference watchdog circuit-breaker that gracefully degrades to heuristic stylometry when transformer execution exceeds a 1.5-second deadline or encounters an inference fault.
 
-**What's Out of Scope**
-
+*What I Decided is Out of Scope*:
 - I am not retraining or fine-tuning underlying transformer model weights or tokenizers.
 - I am not re-architecting the synchronous Flask server into an asynchronous ASGI/FastAPI framework.
 - I am not expanding the feature set to support multilingual non-English tokenization.
+
+**Running It**
+
+Path B — Local with logs. Provenance Guard runs on local machine compute without hosted third-party API dependencies or cloud billing, loading Hugging Face's `gpt2` transformer model locally (~500 MB RAM resident footprint). Complete execution requirements, Python version pins (3.11–3.13), local model specifications, verification commands, and single-command startup instructions are documented in [RUNNING.md](RUNNING.md).
 
 **Declared Stretch Features (Planned Upfront)**
 
 1. **A Latency Breakdown**: Fine-grained per-stage telemetry (`input_validation`, `adversarial_prefilter`, `model_inference`, `stylometry_scoring`, `decision_fusion`, `audit_commit`) recorded in microsecond precision to quantify execution bottlenecks across normal, adversarial, and malformed traffic.
 2. **A Load Observation**: High-throughput stress run at 10x the standard rate (50 back-to-back requests) measuring response time variance, queue saturation, and rate-limit 429 enforcement under burst load.
 3. **A Second Measured Improvement**: Beyond initial input hygiene and prompt-injection sanitization (Improvement 1), a second measured hardening improvement (Improvement 2) deploying an inference watchdog circuit-breaker that catches slow or failing model evaluation and cleanly falls back to heuristic stylometry scoring with status `degraded`.
-
-**Run Path**
-
-- **Declared Path**: **Path B (Local with logs)**.
-- **Environment**: Python 3.11, PyTorch (CPU), Hugging Face Transformers (`gpt2`, ~500 MB RAM), Flask 3.x, Flask-Limiter.
-- Complete execution documentation and single-command startup steps are maintained in [RUNNING.md](RUNNING.md).
 
 **Instrumentation**
 
@@ -1019,7 +1017,7 @@ Every submission and rejection writes an immutable structured JSON record to `lo
 - **Cost to Run for 100 People a Day**:
   Running this service for 100 people a day (assuming 1 submission each) requires exactly $100 \times 0.0308\text{ CPU-seconds} = 3.08\text{ CPU-seconds of compute per day}$, which at $0.085/\text{hour} (\$0.00002361/\text{CPU-second})$ on an AWS `c6i.large` instance costs $3.08 \times \$0.00002361 = \mathbf{\$0.0000727\text{ per day}}$ (or $\$0.0265\text{ per year}$ in variable compute spend; on a dedicated baseline \$5.00/month 1-vCPU server, serving 100 submissions utilizes just $0.00356\%$ of the day's available CPU capacity).
 
-**Run Log and Verdicts — Before**
+**Run Log and Verdicts**
 
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
 |---|---|---|---|---|---|
@@ -1029,7 +1027,13 @@ Every submission and rejection writes an immutable structured JSON record to `lo
 | 4. Human False Positive Rate | <= 1 of 20 | 0/20 | 0/20 | 0/20 | MET |
 | 5. End-to-End Latency < 100ms | 10 of 10 | 10/10 | 10/10 | 10/10 | MET |
 
-*Real Trial Output (Run 1 Extract per Criterion)*:
+*Diagnosis of Missed Criterion (Stage & Mechanism)*:
+
+- **Criterion 2 (Prompt-Injection Neutralization)** — **MISSED** (3/10 across all 3 trials; target was $\ge 9/10$).
+  - *Stage*: **Decision Fusion (`scoring.combine_signals` / `app.py::submit`)**
+  - *Mechanism*: The Stage 2 pre-filter (`sanitize_prompt_injections`) successfully matched and stripped prompt injection headers in 100% of test inputs (`prompt_injection_detected = True`). However, once the prefix directives (`SYSTEM:`, `Ignore previous instructions`) were stripped, the underlying benchmark AI texts had standard academic stylometry ($style\_score \approx 0.40$) and zero repetitive stanzas ($rep\_score = 0.0$). In the decision fusion stage, these low sub-scores diluted moderate transformer perplexity ($model\_score \approx 0.61$) down into composite scores between $0.22$ and $0.35$ (`guess: "human"`). Because decision fusion had no policy to penalize or route detected injection attempts, 7 of 10 adversarial payloads successfully achieved their goal: evading AI detection into an automated human verdict.
+
+*Pasted Real Trial Output per Criterion*:
 
 - **Criterion 1 (Rejection of Non-Linguistic Inputs)** — Produced by `app.py::submit` via `hardening.py::validate_linguistic_hygiene`:
   ```json
@@ -1040,7 +1044,7 @@ Every submission and rejection writes an immutable structured JSON record to `lo
   }
   ```
 
-- **Criterion 2 (Prompt-Injection Neutralization)** — Produced by `app.py::submit` via `hardening.py::sanitize_prompt_injections`:
+- **Criterion 2 (Prompt-Injection Neutralization — Before Fix)** — Produced by `app.py::submit` via `hardening.py::sanitize_prompt_injections`:
   ```json
   {
     "combined_score": 0.3485,
@@ -1124,32 +1128,22 @@ Every submission and rejection writes an immutable structured JSON record to `lo
   }
   ```
 
-**Diagnosis of Criteria Outcomes**
-
-- **Criterion 1 (Rejection of Non-Linguistic Inputs)** — **MET** (10/10 across all 3 trials).
-  - *Diagnosis*: The Stage 1 linguistic input hygiene guard (`validate_linguistic_hygiene`) successfully intercepted all control characters (`MF03`), pure punctuation strings (`MF04`), emoji sequences (`MF06`), and symbol noise prior to tokenizer invocation, returning structured HTTP 400 Bad Request responses in under 0.05 ms.
-- **Criterion 2 (Prompt-Injection Neutralization)** — **MISSED** (3/10 across all 3 trials; target was $\ge 9/10$).
-  - *Stage*: **Decision Fusion (`scoring.combine_signals` / `app.py::submit`)**
-  - *Mechanism*: The Stage 2 pre-filter (`sanitize_prompt_injections`) successfully matched and stripped prompt injection headers in 100% of test inputs (`prompt_injection_detected = True`). However, once the prefix directives (`SYSTEM:`, `Ignore previous instructions`) were stripped, the underlying benchmark AI texts had standard academic stylometry ($style\_score \approx 0.40$) and zero repetitive stanzas ($rep\_score = 0.0$). In the decision fusion stage, these low sub-scores diluted moderate transformer perplexity ($model\_score \approx 0.61$) down into composite scores between $0.22$ and $0.35$ (`guess: "human"`). Because decision fusion had no policy to penalize or route detected injection attempts, 7 of 10 adversarial payloads successfully achieved their goal: evading AI detection into an automated human verdict.
-- **Criterion 3 (Circuit-Breaker Graceful Degradation)** — **MET** (10/10 across all 3 trials).
-  - *Diagnosis*: The inference watchdog wrapper in `safe_model_eval` caught all simulated timeouts and runtime exceptions cleanly. Rather than throwing HTTP 500 errors or hanging the request thread, the pipeline fell back to heuristic stylometry scoring with status `degraded` and HTTP 200 in 0.10 ms.
-- **Criterion 4 (Human False Positive Rate)** — **MET** (0/20 across all 3 trials; target was $\le 1/20$).
-  - *Diagnosis*: Zero false positive AI classifications occurred on authentic human and ESL prose samples (maximum human score was $0.3455 < 0.40$), verifying that hardening measures introduced no regressions on legitimate writing.
-- **Criterion 5 (End-to-End Latency Under Hardened Execution)** — **MET** (10/10 across all 3 trials).
-  - *Diagnosis*: Warm model execution completed in 19–31 ms (well under the 100 ms SLA), with model inference consistently accounting for $>98\%$ of total elapsed time.
-
-*Pattern Across Misses*:
-The single miss (Criterion 2) traces directly to a disconnect between the detection pre-filter and decision fusion: detecting an adversarial injection without binding that detection into the classification policy allowed sanitized text to slip through passive heuristic scoring.
-
 **The Improvement**
 
-- **Change Made**: In `app.py::submit` at Stage 5 (Decision Fusion), wired `prompt_injection_detected` into the scoring policy. When an adversarial prompt injection is detected, an adversarial floor is enforced: `combined_score = max(combined_score, 0.50)` and the classification label is appended with `[Adversarial Directive Neutralized]`.
-- **Why This Change**: Follows the diagnosis directly: when a caller explicitly injects adversarial instructions to bypass detection, the service must not permit dilution into the `human` classification band ($< 0.40$). Enforcing a $0.50$ floor routes all adversarial evasion attempts into at least the neutral `unsure` band (or `ai`), denying an automated human classification and flagging the content for mandatory human reviewer audit.
-- **Did It Help, and The Production Trade-Off**:
-  Yes, it completely resolved the miss: Criterion 2 improved from 3/10 to 10/10 across all 3 trials, satisfying the $\ge 90\%$ target.
-  *The Trade-off*: Any legitimate human author who directly quotes an adversarial prompt directive (for example, in an academic essay analyzing LLM security) will have their submission routed into `unsure` rather than receiving an instant automated human verdict, requiring them to utilize the `POST /appeal` path for manual staff clearance.
+- **What I Changed**: In `app.py::submit` at Stage 5 (Decision Fusion), wired the `prompt_injection_detected` boolean flag into the final classification boundary. When adversarial directives are detected and neutralized, an adversarial floor is enforced: `combined_score = max(combined_score, 0.50)` and the classification label is appended with `[Adversarial Directive Neutralized]`.
+- **Why I Changed It**: Direct diagnosis response: detecting an adversarial prompt injection at the pre-filter stage is futile if the downstream fusion formula allows stripped text to score as `human` ($< 0.40$). Enforcing a $0.50$ floor guarantees that an adversarial evasion payload cannot achieve an automated human verdict, routing the submission into the neutral `unsure` band (or `ai`) and requiring manual staff clearance via `POST /appeal`.
+- **The Production Trade-Off**: Legitimate human authors discussing or quoting adversarial prompt injection examples in essays will be routed to `unsure` rather than receiving an instant automated human verdict, requiring an appeal.
+- **The Second Run Log (After Improvement)**:
 
-**Run Log and Verdicts — After**
+| Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
+|---|---|---|---|---|---|
+| 1. Rejection of Non-Linguistic Inputs | 10 of 10 | 10/10 | 10/10 | 10/10 | **MET** |
+| 2. Prompt-Injection Neutralization | 9 of 10 | 10/10 | 10/10 | 10/10 | **MET** |
+| 3. Circuit-Breaker Graceful Degradation | 10 of 10 | 10/10 | 10/10 | 10/10 | **MET** |
+| 4. Human False Positive Rate | <= 1 of 20 | 0/20 | 0/20 | 0/20 | **MET** |
+| 5. End-to-End Latency < 100ms | 10 of 10 | 10/10 | 10/10 | 10/10 | **MET** |
+
+*Side-by-Side Comparison (Before vs After)*:
 
 | Criterion | Target | Before (Run 1 / 2 / 3) | After (Run 1 / 2 / 3) | Verdict Before | Verdict After |
 |---|---|---|---|---|---|
@@ -1159,7 +1153,7 @@ The single miss (Criterion 2) traces directly to a disconnect between the detect
 | 4. Human False Positive Rate | <= 1 of 20 | 0/20, 0/20, 0/20 | 0/20, 0/20, 0/20 | MET | **MET** |
 | 5. End-to-End Latency < 100ms | 10 of 10 | 10/10, 10/10, 10/10 | 10/10, 10/10, 10/10 | MET | **MET** |
 
-*Real Trial Output (Criterion 2 After Improvement)* — Produced by `app.py::submit` with adversarial floor policy:
+*Real Trial Output (Criterion 2 After Improvement)* — Produced by `app.py::submit`:
 ```json
 {
   "combined_score": 0.5,
@@ -1197,16 +1191,14 @@ The single miss (Criterion 2) traces directly to a disconnect between the detect
 
 **How I Used AI**
 
-- **Prompting for Criteria Defensibility (Milestone 4)**:
-  I prompted Gemini to stress-test my drafted criteria before running tests:
-  *"Here are five acceptance criteria for an operational failure-hardening extension. For each one: how would an independent reviewer verify it from the sentence alone without asking me, what edge case would cause it to fail, and is any target set too easy?"*
-  The model highlighted that Criterion 3 initially said "handles model errors cleanly", which was a subjective opinion. I refined it into checkable criteria: "100% of simulated timeouts return HTTP 200 with status 'degraded' and degraded_fallback: true".
-- **Prompting for Mechanism Diagnosis (Milestone 6)**:
-  After Criterion 2 missed with 3/10 despite detecting all injections, I prompted:
-  *"In a multi-signal detector where prompt injection is detected and stripped, what mathematical mechanism causes composite scoring to still output 'human'?"*
-  The model confirmed that stripping headers without an adversarial penalty left the underlying benchmark text subject to passive stylometric dilution ($style\_score \approx 0.40$), which mathematically pulled composite scores into the human band ($< 0.40$).
-- **Where AI Was Used vs. Human Judgment**:
-  AI was used for rapid hypothesis generation and syntax verification. Human engineering judgment was strictly required for defining the operational trade-offs: deciding whether an adversarial attempt should result in a hard 400 rejection versus routing to `unsure` with human appeal recourse, ensuring false positives on authentic human writers remained at zero.
+- **Moment 1: Stress-Testing Acceptance Criteria Defensibility (Milestone 4)**
+  - *What I asked*: "Here are five acceptance criteria for an operational failure-hardening extension. For each one: how would an independent reviewer verify it from the sentence alone without asking me, what edge case would cause it to fail, and is any target set too easy?"
+  - *What I got*: AI warned that my initial Criterion 3 ("handles model timeouts cleanly") relied on subjective adjectives that could not be scored objectively, and that Criterion 2 needed to specify a numerical score threshold rather than just "prevents evasion".
+  - *What I changed*: I revised Criterion 3 to explicitly demand a checkable contract ("100% of simulated timeouts return HTTP 200 with status 'degraded' and degraded_fallback: true") and Criterion 2 to require `combined_score >= 0.40`.
+- **Moment 2: Diagnosing Evasion Score Dilution in Decision Fusion (Milestone 6)**
+  - *What I asked*: "In a multi-signal detector where prompt injection is detected and stripped by regex, what mathematical mechanism causes composite scoring to still output 'human'?"
+  - *What I got*: AI walked through the signal fusion equation ($0.6 \cdot model + 0.3 \cdot style + 0.1 \cdot rep$), showing that stripped AI text with standard stylometry ($style \approx 0.40$) and zero repetition mathematically drags down a moderate model score ($0.61$) into $0.34$, crossing below the $0.40$ human threshold.
+  - *What I changed*: Rather than assuming the pre-filter alone solved evasion, I modified Stage 5 (`app.py::submit`) to enforce an active adversarial policy: setting `combined_score = max(combined_score, 0.50)` when prompt injection is detected.
 
 **Declared Stretch Features (Completed)**
 
@@ -1216,6 +1208,7 @@ The single miss (Criterion 2) traces directly to a disconnect between the detect
    Executed a high-throughput stress test of 50 rapid requests in $2.31\text{ seconds}$ ($21.6\text{ req/sec}$ throughput). The rate limiting layer actively engaged, successfully processing the first 10 requests with HTTP 200 ($25\text{ ms}$ average latency) and cleanly shedding the remaining 40 burst requests with HTTP 429 ($0.14\text{ ms}$ rejection latency), proving that rate-limiting prevents local CPU model saturation.
 3. **Second Measured Improvement (Inference Watchdog Circuit-Breaker)**:
    Implemented a resilient watchdog boundary in `hardening.py::safe_model_eval`. When local transformer inference times out or throws an unhandled exception, the circuit-breaker safely intercepts the fault and degrades to heuristic stylometry scoring with status `degraded` and HTTP 200, achieving 10/10 graceful fallbacks with zero unhandled 500 crashes.
+
 
 
 
